@@ -48,9 +48,9 @@ jobs:
           CI: true
 
       - name: Test server
-        run: pnpm --filter server test -- --run --passWithNoTests
+        run: pnpm --filter server exec vitest run --passWithNoTests
         env:
           NODE_ENV: test
 
       - name: Test web
-        run: pnpm --filter web test -- --run --passWithNoTests
+        run: pnpm --filter web exec vitest run --passWithNoTests
