@@ -1,0 +1,88 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  displayName  String   @map("display_name")
+  role         String   @default("STUDENT")
+  avatarUrl    String?  @map("avatar_url")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  ownedRooms  Room[]       @relation("RoomOwner")
+  enrollments Enrollment[]
+  liveStreams  LiveStream[]
+
+  @@map("users")
+}
+
+model Room {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  joinCode    String   @unique @map("join_code")
+  ownerId     String   @map("owner_id")
+  isArchived  Boolean  @default(false) @map("is_archived")
+  maxStudents Int      @default(30) @map("max_students")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  owner       User         @relation("RoomOwner", fields: [ownerId], references: [id])
+  enrollments Enrollment[]
+  sessions    Session[]
+
+  @@map("rooms")
+}
+
+model Enrollment {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  roomId     String   @map("room_id")
+  status     String   @default("ACTIVE")
+  enrolledAt DateTime @default(now()) @map("enrolled_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roomId])
+  @@map("enrollments")
+}
+
+model Session {
+  id        String    @id @default(uuid())
+  roomId    String    @map("room_id")
+  status    String    @default("SCHEDULED")
+  title     String?
+  startedAt DateTime? @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  room       Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  liveStreams LiveStream[]
+
+  @@map("sessions")
+}
+
+model LiveStream {
+  id                  String    @id @default(uuid())
+  sessionId           String    @map("session_id")
+  userId              String    @map("user_id")
+  status              String    @default("PUBLISHING")
+  mediasoupProducerId String?   @map("mediasoup_producer_id")
+  kind                String    @default("video")
+  startedAt           DateTime  @default(now()) @map("started_at")
+  stoppedAt           DateTime? @map("stopped_at")
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("live_streams")
+}

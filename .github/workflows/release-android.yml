@@ -1,0 +1,81 @@
+name: Release Android
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build APK
+    uses: ./.github/workflows/build-android.yml
+    with:
+      build_type: apk
+      version_name: ${{ github.ref_name }}
+      version_code: ${{ github.run_number }}
+    secrets: inherit
+
+  build-aab:
+    name: Build AAB
+    uses: ./.github/workflows/build-android.yml
+    with:
+      build_type: aab
+      version_name: ${{ github.ref_name }}
+      version_code: ${{ github.run_number }}
+    secrets: inherit
+
+  release:
+    name: Create Release
+    needs: [build-apk, build-aab]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: classitin-release-apk
+          path: artifacts/apk
+
+      - name: Download AAB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: classitin-release-aab
+          path: artifacts/aab
+
+      - name: Rename artifacts
+        run: |
+          mv artifacts/apk/app-release.apk "classitin-${{ steps.version.outputs.version }}.apk"
+          mv artifacts/aab/app-release.aab "classitin-${{ steps.version.outputs.version }}.aab"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Classitin v${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            classitin-${{ steps.version.outputs.version }}.apk
+            classitin-${{ steps.version.outputs.version }}.aab
+
+      # Upload AAB to Play Store internal testing track.
+      # Only runs if the Play Store service account secret is configured.
+      - name: Upload to Play Store
+        if: env.SERVICE_ACCOUNT != ''
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_STORE_SERVICE_ACCOUNT_JSON }}
+          packageName: com.classitin.mobile
+          releaseFiles: classitin-${{ steps.version.outputs.version }}.aab
+          track: internal
+          status: completed

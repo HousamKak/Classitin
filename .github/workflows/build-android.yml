@@ -1,0 +1,145 @@
+name: Build Android
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build output format'
+        required: true
+        default: 'apk'
+        type: choice
+        options:
+          - apk
+          - aab
+
+  # Also triggered by the release workflow
+  workflow_call:
+    inputs:
+      build_type:
+        type: string
+        default: 'apk'
+      version_name:
+        type: string
+        default: ''
+      version_code:
+        type: string
+        default: ''
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Android (${{ inputs.build_type || 'apk' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/android/gradle/wrapper/gradle-wrapper.properties', 'apps/mobile/android/**/*.gradle*') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # gradle.properties has local Windows paths that don't exist in CI.
+      # Strip them so Gradle uses CI environment defaults.
+      - name: Fix gradle.properties for CI
+        working-directory: apps/mobile/android
+        run: |
+          sed -i '/org.gradle.java.home/d' gradle.properties
+          sed -i '/org.gradle.user.home/d' gradle.properties
+          sed -i 's|-Djava.io.tmpdir=[^ ]*||g' gradle.properties
+
+      # pnpm lesson learned: delete stale autolinking cache
+      - name: Clean autolinking cache
+        run: rm -rf apps/mobile/android/build/generated/autolinking
+
+      # Decode release keystore from secret (if available)
+      - name: Decode keystore
+        if: env.KEYSTORE != ''
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE" | base64 -d > apps/mobile/android/app/classitin-release.keystore
+
+      # --- Build APK ---
+      - name: Build APK
+        if: (inputs.build_type || 'apk') == 'apk'
+        working-directory: apps/mobile/android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ secrets.ANDROID_KEYSTORE_BASE64 && 'classitin-release.keystore' || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_NAME: ${{ inputs.version_name || '' }}
+          VERSION_CODE: ${{ inputs.version_code || '' }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK
+        if: (inputs.build_type || 'apk') == 'apk'
+        uses: actions/upload-artifact@v4
+        with:
+          name: classitin-release-apk
+          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      # --- Build AAB ---
+      - name: Build AAB
+        if: (inputs.build_type || 'apk') == 'aab'
+        working-directory: apps/mobile/android
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ secrets.ANDROID_KEYSTORE_BASE64 && 'classitin-release.keystore' || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_NAME: ${{ inputs.version_name || '' }}
+          VERSION_CODE: ${{ inputs.version_code || '' }}
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Upload AAB
+        if: (inputs.build_type || 'apk') == 'aab'
+        uses: actions/upload-artifact@v4
+        with:
+          name: classitin-release-aab
+          path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 30

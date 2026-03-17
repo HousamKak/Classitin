@@ -1,0 +1,27 @@
+{
+  "expo": {
+    "name": "Classitin",
+    "slug": "classitin",
+    "version": "1.0.0",
+    "orientation": "default",
+    "scheme": "classitin",
+    "platforms": ["ios", "android"],
+    "ios": {
+      "bundleIdentifier": "com.classitin.mobile",
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.classitin.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#4F46E5"
+      },
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
+      ]
+    },
+    "plugins": [
+      "@config-plugins/react-native-webrtc"
+    ]
+  }
+}

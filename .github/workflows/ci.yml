@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, Typecheck & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Shared package exports raw TS (no build step needed),
+      # but server and web need their deps resolved.
+
+      - name: Typecheck shared
+        run: pnpm --filter @classitin/shared exec tsc --noEmit
+
+      - name: Typecheck server
+        run: pnpm --filter server exec tsc --noEmit
+
+      - name: Typecheck web
+        run: pnpm --filter web exec tsc -b --noEmit
+
+      - name: Build web (validates Vite bundling)
+        run: pnpm --filter web build
+        env:
+          # Skip HTTPS cert check in CI (dev-only feature)
+          CI: true
+
+      - name: Test server
+        run: pnpm --filter server test -- --run --passWithNoTests
+        env:
+          NODE_ENV: test
+
+      - name: Test web
+        run: pnpm --filter web test -- --run --passWithNoTests
