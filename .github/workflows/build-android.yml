@@ -41,7 +41,7 @@ on:
         required: false
 
 concurrency:
-  group: build-android-${{ github.ref }}
+  group: build-android-${{ github.ref }}-${{ inputs.build_type || 'apk' }}
   cancel-in-progress: true
 
 jobs:
@@ -76,6 +76,9 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('apps/mobile/android/gradle/wrapper/gradle-wrapper.properties', 'apps/mobile/android/**/*.gradle*') }}
           restore-keys: gradle-${{ runner.os }}-
+
+      - name: Make gradlew executable
+        run: chmod +x apps/mobile/android/gradlew
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
