@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 
 interface VideoRendererProps {
   track: MediaStreamTrack | null;
@@ -10,6 +10,7 @@ interface VideoRendererProps {
 export function VideoRenderer({ track, muted = true, className = '', mirror = false }: VideoRendererProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const currentTrackRef = useRef<MediaStreamTrack | null>(null);
+  const [aspectRatio, setAspectRatio] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -21,56 +22,55 @@ export function VideoRenderer({ track, muted = true, className = '', mirror = fa
 
     if (!track) {
       video.srcObject = null;
+      setAspectRatio(undefined);
       return;
     }
-
-    console.log('[VideoRenderer] Attaching track:', {
-      trackId: track.id,
-      kind: track.kind,
-      readyState: track.readyState,
-      muted: track.muted,
-      enabled: track.enabled,
-    });
 
     const stream = new MediaStream([track]);
     video.srcObject = stream;
 
-    // Monitor track state changes
-    const onUnmute = () => {
-      console.log('[VideoRenderer] Track unmuted:', track.id);
+    const onEnded = () => {
+      setAspectRatio(undefined);
     };
-    const onMute = () => console.log('[VideoRenderer] Track muted:', track.id);
-    const onEnded = () => console.log('[VideoRenderer] Track ended:', track.id);
 
-    track.addEventListener('unmute', onUnmute);
-    track.addEventListener('mute', onMute);
     track.addEventListener('ended', onEnded);
 
     return () => {
-      track.removeEventListener('unmute', onUnmute);
-      track.removeEventListener('mute', onMute);
       track.removeEventListener('ended', onEnded);
       currentTrackRef.current = null;
     };
   }, [track]);
 
-  // Use onLoadedMetadata to play — avoids the "play() interrupted" race
+  // Use onLoadedMetadata to play and detect aspect ratio
   const handleLoadedMetadata = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    console.log('[VideoRenderer] loadedmetadata fired, calling play()');
-    video.play().catch((err) => {
-      console.warn('[VideoRenderer] play() failed:', err.message);
+    if (video.videoWidth && video.videoHeight) {
+      setAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
+    }
+    video.play().catch(() => {
+      // autoplay may be blocked
     });
+  }, []);
+
+  // Handle resize events (e.g. simulcast layer switch changes resolution)
+  const handleResize = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.videoWidth && video.videoHeight) {
+      setAspectRatio(`${video.videoWidth} / ${video.videoHeight}`);
+    }
   }, []);
 
   return (
     <video
       ref={videoRef}
       onLoadedMetadata={handleLoadedMetadata}
+      onResize={handleResize}
       autoPlay
       playsInline
       muted={muted}
+      style={aspectRatio ? { aspectRatio } : undefined}
       className={`block bg-gray-900 ${mirror ? 'scale-x-[-1]' : ''} ${className}`}
     />
   );

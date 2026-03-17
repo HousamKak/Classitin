@@ -14,9 +14,15 @@ import { TeacherScreenShare } from '@/components/teacher/TeacherScreenShare';
 import { StudentGrid } from '@/components/teacher/StudentGrid';
 import { StudentFocusView } from '@/components/teacher/StudentFocusView';
 import { ClassRoster } from '@/components/teacher/ClassRoster';
+import { VoiceControls } from '@/components/teacher/VoiceControls';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+import { ChatPanel } from '@/components/common/ChatPanel';
+import { useAudio } from '@/hooks/useAudio';
+import { useVoiceEvents } from '@/hooks/useVoiceEvents';
+import { useChat } from '@/hooks/useChat';
 import type { Transport } from 'mediasoup-client/types';
-import { Users } from 'lucide-react';
+import { Users, MessageCircle } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 export function TeacherDashboard() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -39,6 +45,17 @@ export function TeacherDashboard() {
   const [showRoster, setShowRoster] = useState(true);
 
   const { focusStudent, unfocusStudent, subscribeToProducer } = useStudentStreams(sessionId, recvTransport);
+  const { playAudioTrack, stopAudioTrack } = useVoiceEvents(sessionId);
+
+  // Auto-play audio consumers through speakers
+  const consumers = useMediaStore((s) => s.consumers);
+  useEffect(() => {
+    for (const [consumerId, info] of consumers) {
+      if (info.kind === 'audio') {
+        playAudioTrack(consumerId, info.track);
+      }
+    }
+  }, [consumers, playAudioTrack]);
 
   useEffect(() => {
     if (roomId) fetchRoom(roomId);
@@ -60,16 +77,11 @@ export function TeacherDashboard() {
       const transport = await getRecvTransport();
       recvTransportRef.current = transport;
       setRecvTransport(transport);
-      console.log('[TeacherDashboard] recvTransport created, id:', transport.id);
 
-      // Consume existing producers directly with the transport variable
-      // (can't use subscribeToProducer here because recvTransport state hasn't updated yet)
       const producers = response.existingProducers as Array<{ producerId: string; userId: string }>;
-      console.log('[TeacherDashboard] existingProducers:', producers);
       for (const p of producers) {
         if (p.userId !== user?.id) {
           try {
-            console.log('[TeacherDashboard] consuming existing producer:', p.producerId, 'from user:', p.userId);
             const consumer = await consumeStream(transport, sessionId!, p.producerId);
             addConsumer({
               consumerId: consumer.id,
@@ -93,8 +105,10 @@ export function TeacherDashboard() {
         socket.emit('room:leave', { roomId, sessionId });
         cleanupMedia();
         clearAll();
-        setJoined(false);
+        sendTransportRef.current = null;
+        recvTransportRef.current = null;
         setRecvTransport(null);
+        setJoined(false);
       }
     };
   }, [isConnected, sessionId, roomId, joined]);
@@ -118,7 +132,21 @@ export function TeacherDashboard() {
     return transport;
   }, [getSendTransport]);
 
+  const {
+    voiceMode,
+    isMuted,
+    privateCallUserId,
+    startBroadcast,
+    startPrivateCall,
+    stopVoice,
+    toggleMute,
+  } = useAudio({ getSendTransport: getSendTransportCb });
+
+  const { messages, unreadCount, isOpen: chatOpen, sendMessage, toggleOpen: toggleChat } = useChat(sessionId);
+  const [showChat, setShowChat] = useState(false);
+
   const focusedParticipant = focusedStudentId ? participants.get(focusedStudentId) : null;
+  const privateCallParticipant = privateCallUserId ? participants.get(privateCallUserId) : null;
   const studentCount = Array.from(participants.values()).filter(p => p.role === 'STUDENT').length;
 
   if (!currentRoom) return <LoadingSpinner />;
@@ -128,42 +156,75 @@ export function TeacherDashboard() {
       {/* Main area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <div className="flex items-center justify-between border-b border-gray-100 bg-white px-4 md:px-6 py-3">
+        <div className="flex items-center justify-between border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm px-4 md:px-6 py-3">
           <div className="flex items-center gap-4">
             <div>
-              <h2 className="text-base font-semibold text-gray-900">{currentRoom.name}</h2>
-              <p className="text-xs text-gray-400">Teacher Dashboard</p>
+              <h2 className="text-base font-semibold text-gray-100">{currentRoom.name}</h2>
+              <p className="text-xs text-gray-500">Teacher Dashboard</p>
             </div>
             {joined && (
-              <span className="hidden sm:flex items-center gap-1.5 rounded-full bg-gray-50 px-3 py-1 text-xs font-medium text-gray-500">
+              <span className="hidden sm:flex items-center gap-1.5 rounded-full bg-gray-800 px-3 py-1 text-xs font-medium text-gray-400">
                 <Users className="h-3 w-3" />
                 {studentCount} student{studentCount !== 1 ? 's' : ''}
               </span>
             )}
           </div>
           <div className="flex items-center gap-3">
+            {joined && (
+              <VoiceControls
+                voiceMode={voiceMode}
+                isMuted={isMuted}
+                privateCallUserId={privateCallUserId}
+                privateCallName={privateCallParticipant?.displayName}
+                onStartBroadcast={startBroadcast}
+                onStartPrivateCall={startPrivateCall}
+                onStop={stopVoice}
+                onToggleMute={toggleMute}
+              />
+            )}
             <SessionControls
               session={currentSession}
               onStart={handleStartSession}
               onEnd={handleEndSession}
             />
             {joined && (
-              <button
-                onClick={() => setShowRoster(!showRoster)}
-                className={`hidden md:flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
-                  showRoster ? 'bg-primary-50 text-primary-600' : 'text-gray-400 hover:bg-gray-100'
-                }`}
-                title="Toggle roster"
-              >
-                <Users className="h-4 w-4" />
-              </button>
+              <>
+                <button
+                  onClick={() => { setShowChat(!showChat); if (!showChat) toggleChat(); }}
+                  className={`relative flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
+                    showChat ? 'bg-primary-500/15 text-primary-400' : 'text-gray-500 hover:bg-gray-800'
+                  }`}
+                  title="Toggle chat"
+                >
+                  <MessageCircle className="h-4 w-4" />
+                  {unreadCount > 0 && !showChat && (
+                    <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-500 px-1 text-[9px] font-bold text-white">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowRoster(!showRoster)}
+                  className={`hidden md:flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
+                    showRoster ? 'bg-primary-500/15 text-primary-400' : 'text-gray-500 hover:bg-gray-800'
+                  }`}
+                  title="Toggle roster"
+                >
+                  <Users className="h-4 w-4" />
+                </button>
+              </>
             )}
           </div>
         </div>
 
         {/* Content */}
         {currentSession?.status === 'ACTIVE' && joined ? (
-          <div className="flex-1 overflow-auto p-4 md:p-6 space-y-5">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3 }}
+            className="flex-1 overflow-auto p-4 md:p-6 space-y-5"
+          >
             {/* Teacher screen share */}
             <TeacherScreenShare
               sendTransport={sendTransportRef.current}
@@ -171,29 +232,31 @@ export function TeacherDashboard() {
             />
 
             {/* Focused student overlay */}
-            {focusedParticipant && (
-              <StudentFocusView
-                userId={focusedStudentId!}
-                displayName={focusedParticipant.displayName}
-                onClose={unfocusStudent}
-              />
-            )}
+            <AnimatePresence>
+              {focusedParticipant && (
+                <StudentFocusView
+                  userId={focusedStudentId!}
+                  displayName={focusedParticipant.displayName}
+                  onClose={unfocusStudent}
+                />
+              )}
+            </AnimatePresence>
 
             {/* Student grid */}
             <div>
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
                 Student Screens
               </h3>
               <StudentGrid participants={participants} onFocusStudent={focusStudent} />
             </div>
-          </div>
+          </motion.div>
         ) : (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 mb-4">
-                <Users className="h-7 w-7 text-gray-400" />
+              <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-900 border border-gray-800 mb-4">
+                <Users className="h-7 w-7 text-gray-600" />
               </div>
-              <p className="text-sm font-medium text-gray-500">
+              <p className="text-sm font-medium text-gray-400">
                 {currentSession ? 'Connecting to session...' : 'Start a session to begin monitoring'}
               </p>
             </div>
@@ -201,12 +264,35 @@ export function TeacherDashboard() {
         )}
       </div>
 
+      {/* Chat panel */}
+      <AnimatePresence>
+        {currentSession?.status === 'ACTIVE' && joined && showChat && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 300, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="overflow-hidden border-l border-gray-800 bg-gray-900/80 backdrop-blur-sm"
+          >
+            <ChatPanel messages={messages} onSend={sendMessage} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sidebar roster */}
-      {currentSession?.status === 'ACTIVE' && joined && showRoster && (
-        <div className="hidden md:block w-64 overflow-auto border-l border-gray-100 bg-white">
-          <ClassRoster participants={participants} onFocusStudent={focusStudent} />
-        </div>
-      )}
+      <AnimatePresence>
+        {currentSession?.status === 'ACTIVE' && joined && showRoster && !showChat && (
+          <motion.div
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 256, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
+            className="hidden md:block overflow-auto border-l border-gray-800 bg-gray-900/80 backdrop-blur-sm"
+          >
+            <ClassRoster participants={participants} onFocusStudent={focusStudent} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import type { Server, Socket } from 'socket.io';
 import { roomManager } from '../../mediasoup/roomManager.js';
 import { presenceService } from '../../services/presence.service.js';
 import { logger } from '../../utils/logger.js';
+import { THUMBNAIL_LAYER } from '@classitin/shared';
 
 export function registerSignalingHandlers(socket: Socket, io: Server) {
   // Create send transport
@@ -67,48 +68,60 @@ export function registerSignalingHandlers(socket: Socket, io: Server) {
 
       peer.producers.set(producer.id, producer);
 
-      // Update presence
-      presenceService.setSharing(sessionId, userId, true);
-
-      // Broadcast to room
       const roomName = `session:${sessionId}`;
-      const room = io.sockets.adapter.rooms.get(roomName);
-      const socketsInRoom = room ? Array.from(room) : [];
-      logger.info({ sessionId, userId, roomName, socketsInRoom, producerId: producer.id }, 'Broadcasting stream:started to room');
-      socket.to(roomName).emit('stream:started', {
-        userId,
-        producerId: producer.id,
-        kind: producer.kind,
-        appData: producer.appData,
-      });
+      const isAudio = kind === 'audio';
+      const target = appData?.target as string | undefined;
+      const targetUserId = appData?.targetUserId as string | undefined;
+
+      if (isAudio && target === 'private' && targetUserId) {
+        // Private audio: only notify the target user
+        const targetSocketId = presenceService.getSocketId(sessionId, targetUserId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit('stream:started', {
+            userId,
+            producerId: producer.id,
+            kind: producer.kind,
+            appData: producer.appData,
+          });
+          io.to(targetSocketId).emit('voice:call-incoming', {
+            fromUserId: userId,
+            fromDisplayName: socket.data.displayName || 'Teacher',
+          });
+        }
+        logger.info({ sessionId, userId, targetUserId, producerId: producer.id }, 'Private audio producer created');
+      } else if (isAudio && target === 'broadcast') {
+        // Broadcast audio: notify all peers
+        socket.to(roomName).emit('stream:started', {
+          userId,
+          producerId: producer.id,
+          kind: producer.kind,
+          appData: producer.appData,
+        });
+        socket.to(roomName).emit('voice:broadcast-started', {
+          userId,
+          producerId: producer.id,
+        });
+        logger.info({ sessionId, userId, producerId: producer.id }, 'Broadcast audio producer created');
+      } else {
+        // Video/screen: update presence and broadcast normally
+        presenceService.setSharing(sessionId, userId, true);
+        socket.to(roomName).emit('stream:started', {
+          userId,
+          producerId: producer.id,
+          kind: producer.kind,
+          appData: producer.appData,
+        });
+      }
 
       producer.on('transportclose', () => {
         peer.producers.delete(producer.id);
-        presenceService.setSharing(sessionId, userId, false);
+        if (!isAudio) {
+          presenceService.setSharing(sessionId, userId, false);
+        }
       });
 
       ack({ producerId: producer.id });
-      logger.info({ sessionId, userId, producerId: producer.id, kind }, 'Producer created');
-
-      // Log producer stats after a short delay to check if media is flowing
-      setTimeout(async () => {
-        try {
-          const stats = await producer.getStats();
-          const statsArr = Array.from(stats.values()) as Array<Record<string, unknown>>;
-          const inbound = statsArr.find((s) => s.type === 'inbound-rtp');
-          if (inbound) {
-            logger.info({
-              producerId: producer.id,
-              bytesReceived: inbound.byteCount,
-              packetCount: inbound.packetCount,
-            }, 'Producer stats after 3s');
-          } else {
-            logger.info({ producerId: producer.id, stats: statsArr }, 'Producer stats after 3s (raw)');
-          }
-        } catch {
-          // producer might be closed
-        }
-      }, 3000);
+      logger.info({ sessionId, userId, producerId: producer.id, kind, target }, 'Producer created');
     } catch (err) {
       logger.error(err, 'Error producing');
       ack({ error: 'Failed to produce' });
@@ -142,6 +155,14 @@ export function registerSignalingHandlers(socket: Socket, io: Server) {
 
       peer.consumers.set(consumer.id, consumer);
 
+      // Set initial preferred layer to thumbnail quality for simulcast producers
+      if (consumer.type === 'simulcast') {
+        await consumer.setPreferredLayers({
+          spatialLayer: THUMBNAIL_LAYER.spatialLayer,
+          temporalLayer: THUMBNAIL_LAYER.temporalLayer,
+        });
+      }
+
       consumer.on('transportclose', () => {
         peer.consumers.delete(consumer.id);
       });
@@ -158,7 +179,7 @@ export function registerSignalingHandlers(socket: Socket, io: Server) {
         producerPaused: consumer.producerPaused,
       });
 
-      logger.info({ sessionId, userId, consumerId: consumer.id, producerId }, 'Consumer created');
+      logger.info({ sessionId, userId, consumerId: consumer.id, producerId, type: consumer.type }, 'Consumer created');
     } catch (err) {
       logger.error(err, 'Error consuming');
       ack({ error: 'Failed to consume' });
@@ -170,36 +191,10 @@ export function registerSignalingHandlers(socket: Socket, io: Server) {
     try {
       const { consumerId } = payload;
       const sessionId = socket.data.sessionId;
-      logger.info({ sessionId, consumerId }, 'consume:resume received');
       const result = roomManager.findConsumer(sessionId, consumerId);
       if (!result) return ack({ error: 'Consumer not found' });
       await result.consumer.resume();
-
-      // Request a key frame to ensure the consumer gets the first frame
       await result.consumer.requestKeyFrame();
-
-      logger.info({ sessionId, consumerId }, 'Consumer resumed successfully');
-
-      // Log consumer stats after delay to check if media is arriving
-      setTimeout(async () => {
-        try {
-          const stats = await result.consumer.getStats();
-          const statsArr = Array.from(stats.values()) as Array<Record<string, unknown>>;
-          const outbound = statsArr.find((s) => s.type === 'outbound-rtp');
-          if (outbound) {
-            logger.info({
-              consumerId,
-              byteCount: outbound.byteCount,
-              packetCount: outbound.packetCount,
-            }, 'Consumer stats after 3s');
-          } else {
-            logger.info({ consumerId, stats: statsArr }, 'Consumer stats after 3s (raw)');
-          }
-        } catch {
-          // consumer might be closed
-        }
-      }, 3000);
-
       ack({});
     } catch (err) {
       logger.error(err, 'Error resuming consumer');
@@ -306,18 +301,49 @@ export function registerSignalingHandlers(socket: Socket, io: Server) {
       const peer = roomManager.getPeer(sessionId, userId);
       const producer = peer?.producers.get(producerId);
       if (producer) {
+        const appData = producer.appData as Record<string, unknown>;
+        const isAudio = producer.kind === 'audio';
+        const target = appData?.target as string | undefined;
+        const targetUserId = appData?.targetUserId as string | undefined;
+
         producer.close();
         peer!.producers.delete(producerId);
-        presenceService.setSharing(sessionId, userId, false);
-        socket.to(`session:${sessionId}`).emit('stream:stopped', {
-          userId,
-          producerId,
-        });
+
+        if (isAudio && target === 'private' && targetUserId) {
+          const targetSocketId = presenceService.getSocketId(sessionId, targetUserId);
+          if (targetSocketId) {
+            io.to(targetSocketId).emit('voice:call-ended', { fromUserId: userId });
+          }
+        } else if (isAudio && target === 'broadcast') {
+          socket.to(`session:${sessionId}`).emit('voice:broadcast-ended', { userId });
+        } else {
+          presenceService.setSharing(sessionId, userId, false);
+          socket.to(`session:${sessionId}`).emit('stream:stopped', {
+            userId,
+            producerId,
+          });
+        }
       }
       ack({});
     } catch (err) {
       logger.error(err, 'Error closing producer');
       ack({ error: 'Failed to close producer' });
+    }
+  });
+
+  // Voice call management
+  socket.on('voice:call-end', (payload) => {
+    try {
+      const { sessionId, targetUserId } = payload;
+      const userId = socket.data.userId;
+      if (targetUserId) {
+        const targetSocketId = presenceService.getSocketId(sessionId, targetUserId);
+        if (targetSocketId) {
+          io.to(targetSocketId).emit('voice:call-ended', { fromUserId: userId });
+        }
+      }
+    } catch (err) {
+      logger.error(err, 'Error ending voice call');
     }
   });
 }

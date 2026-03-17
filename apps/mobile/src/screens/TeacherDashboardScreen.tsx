@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Dimensions,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Dimensions, Modal,
 } from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useRoomStore } from '@/stores/roomStore';
@@ -9,12 +9,18 @@ import { useSocket } from '@/hooks/useSocket';
 import { useMediasoup } from '@/hooks/useMediasoup';
 import { usePresence } from '@/hooks/usePresence';
 import { useScreenCapture } from '@/hooks/useScreenCapture';
+import { useAudio } from '@/hooks/useAudio';
+import { useVoiceEvents } from '@/hooks/useVoiceEvents';
+import { useChat } from '@/hooks/useChat';
 import { getSocket } from '@/services/socket';
 import { consumeStream, produceScreen, closeProducer, setPreferredLayers } from '@/services/mediasoupClient';
 import { RTCVideoView } from '@/components/RTCVideoView';
 import { StudentThumbnail } from '@/components/StudentThumbnail';
 import { StudentFocusView } from '@/components/StudentFocusView';
 import { ScreenShareButton } from '@/components/ScreenShareButton';
+import { ConnectionBanner } from '@/components/ConnectionBanner';
+import { VoiceControls } from '@/components/VoiceControls';
+import { ChatPanel } from '@/components/ChatPanel';
 import { colors, spacing, fontSize, borderRadius } from '@/theme';
 import type { Transport } from 'mediasoup-client/types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -28,7 +34,7 @@ const THUMBNAIL_WIDTH = (SCREEN_WIDTH - spacing.xl * 2 - spacing.sm * (THUMBNAIL
 
 export function TeacherDashboardScreen({ route, navigation }: Props) {
   const { roomId } = route.params;
-  const { isConnected } = useSocket();
+  const { isConnected, connectionState } = useSocket();
   const { currentRoom, currentSession, fetchRoom, endSession } = useRoomStore();
   const user = useAuthStore((s) => s.user);
   const consumers = useMediaStore((s) => s.consumers);
@@ -47,6 +53,14 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
   const { initDevice, getSendTransport, getRecvTransport, cleanup: cleanupMedia } = useMediasoup(sessionId ?? '');
   const { participants, initRoster } = usePresence(sessionId);
   const { isCapturing, startCapture, stopCapture } = useScreenCapture();
+
+  // Voice
+  const { voiceMode, isMuted, privateCallUserId, startBroadcast, startPrivateCall, stopVoice, toggleMute } =
+    useAudio({ getSendTransport });
+  useVoiceEvents(sessionId);
+
+  // Chat
+  const { messages, unreadCount, isOpen: isChatOpen, sendMessage, toggleOpen: toggleChat } = useChat(sessionId);
 
   const sendTransportRef = useRef<Transport | null>(null);
   const recvTransportRef = useRef<Transport | null>(null);
@@ -74,7 +88,6 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
       const transport = await getRecvTransport();
       recvTransportRef.current = transport;
 
-      // Pre-create send transport
       try {
         const sendT = await getSendTransport();
         sendTransportRef.current = sendT;
@@ -143,16 +156,14 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
   // Focus/unfocus layer switching
   useEffect(() => {
     if (!focusedStudentId) return;
-    // Switch focused student's consumer to high-res layer
     for (const [, info] of consumers) {
-      if (info.userId === focusedStudentId) {
+      if (info.userId === focusedStudentId && info.kind === 'video') {
         setPreferredLayers(info.consumerId, 2);
       }
     }
     return () => {
-      // Switch back to low-res
       for (const [, info] of consumers) {
-        if (info.userId === focusedStudentId) {
+        if (info.userId === focusedStudentId && info.kind === 'video') {
           setPreferredLayers(info.consumerId, 0);
         }
       }
@@ -198,6 +209,7 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
         text: 'End',
         style: 'destructive',
         onPress: async () => {
+          stopVoice();
           await endSession(roomId, currentSession.id);
           navigation.goBack();
         },
@@ -205,10 +217,9 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
     ]);
   };
 
-  // Build student list from participants
+  // Build student list
   const students = Array.from(participants.values()).filter((p) => p.role === 'STUDENT');
 
-  // Get consumer track for a student
   const getStudentTrack = (userId: string): MediaStreamTrack | null => {
     for (const [, info] of consumers) {
       if (info.userId === userId && info.kind === 'video') return info.track;
@@ -219,6 +230,7 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
   // Get focused student info
   const focusedStudent = focusedStudentId ? participants.get(focusedStudentId) : null;
   const focusedTrack = focusedStudentId ? getStudentTrack(focusedStudentId) : null;
+  const focusedName = focusedStudent?.displayName ?? '';
 
   if (!currentRoom || !currentSession) {
     return (
@@ -230,6 +242,9 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
+      {/* Connection Banner */}
+      <ConnectionBanner />
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -241,9 +256,36 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
             </Text>
           </View>
         </View>
-        <TouchableOpacity style={styles.endSessionButton} onPress={handleEndSession}>
-          <Text style={styles.endSessionText}>End</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          {/* Chat toggle */}
+          <TouchableOpacity style={styles.chatButton} onPress={toggleChat} activeOpacity={0.7}>
+            <Text style={styles.chatButtonText}>Chat</Text>
+            {unreadCount > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.endSessionButton} onPress={handleEndSession}>
+            <Text style={styles.endSessionText}>End</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Voice controls */}
+      <View style={styles.voiceBar}>
+        <VoiceControls
+          voiceMode={voiceMode}
+          isMuted={isMuted}
+          privateCallName={
+            privateCallUserId
+              ? participants.get(privateCallUserId)?.displayName
+              : undefined
+          }
+          onStartBroadcast={startBroadcast}
+          onStop={stopVoice}
+          onToggleMute={toggleMute}
+        />
       </View>
 
       {/* Screen share controls */}
@@ -293,18 +335,27 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
       {/* Focus view overlay */}
       {focusedStudent && (
         <StudentFocusView
-          displayName={focusedStudent.displayName}
+          displayName={focusedName}
           track={focusedTrack}
           onClose={() => setFocusedStudent(null)}
         />
       )}
+
+      {/* Chat modal */}
+      <Modal visible={isChatOpen} animationType="slide" presentationStyle="pageSheet">
+        <ChatPanel
+          messages={messages}
+          onSend={sendMessage}
+          onClose={toggleChat}
+        />
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.gray[50] },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: colors.gray[900] },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gray[900] },
   loadingText: { color: colors.gray[400] },
   header: {
     flexDirection: 'row',
@@ -312,40 +363,70 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray[900],
     borderBottomWidth: 1,
-    borderBottomColor: colors.gray[100],
+    borderBottomColor: colors.gray[800],
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   liveDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
     backgroundColor: colors.emerald[500],
   },
-  headerTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.gray[900] },
-  headerSubtitle: { fontSize: fontSize.xs, color: colors.gray[500], marginTop: 1 },
-  endSessionButton: {
-    backgroundColor: colors.red[50],
+  headerTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.white },
+  headerSubtitle: { fontSize: fontSize.xs, color: colors.gray[400], marginTop: 1 },
+  chatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.gray[800],
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.sm,
     borderWidth: 1,
-    borderColor: colors.red[100],
+    borderColor: colors.gray[700],
   },
-  endSessionText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.red[600] },
+  chatButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.gray[300] },
+  unreadBadge: {
+    backgroundColor: colors.primary[500],
+    borderRadius: borderRadius.full,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  unreadText: { fontSize: 10, fontWeight: '800', color: colors.white },
+  endSessionButton: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  endSessionText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.red[500] },
+  voiceBar: {
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.gray[900],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray[800],
+  },
   shareSection: {
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
     gap: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray[900],
     borderBottomWidth: 1,
-    borderBottomColor: colors.gray[100],
+    borderBottomColor: colors.gray[800],
   },
   sectionLabel: {
     fontSize: fontSize.xs,
     fontWeight: '700',
-    color: colors.gray[400],
+    color: colors.gray[500],
     letterSpacing: 1,
   },
   selfPreview: {
@@ -353,6 +434,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     overflow: 'hidden',
     backgroundColor: colors.black,
+    borderWidth: 1,
+    borderColor: colors.gray[800],
   },
   gridSection: {
     flex: 1,
@@ -372,7 +455,7 @@ const styles = StyleSheet.create({
     paddingTop: 60,
   },
   emptyGridText: {
-    color: colors.gray[400],
+    color: colors.gray[500],
     fontSize: fontSize.sm,
     textAlign: 'center',
   },

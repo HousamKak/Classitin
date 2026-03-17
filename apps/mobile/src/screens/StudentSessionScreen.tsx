@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Modal } from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useRoomStore } from '@/stores/roomStore';
 import { useMediaStore } from '@/stores/mediaStore';
@@ -7,10 +7,15 @@ import { useSocket } from '@/hooks/useSocket';
 import { useMediasoup } from '@/hooks/useMediasoup';
 import { usePresence } from '@/hooks/usePresence';
 import { useScreenCapture } from '@/hooks/useScreenCapture';
+import { useVoiceEvents } from '@/hooks/useVoiceEvents';
+import { useChat } from '@/hooks/useChat';
 import { getSocket } from '@/services/socket';
 import { consumeStream, produceScreen, closeProducer } from '@/services/mediasoupClient';
 import { RTCVideoView } from '@/components/RTCVideoView';
 import { ScreenShareButton } from '@/components/ScreenShareButton';
+import { ConnectionBanner } from '@/components/ConnectionBanner';
+import { AudioIndicator } from '@/components/AudioIndicator';
+import { ChatPanel } from '@/components/ChatPanel';
 import { colors, spacing, fontSize, borderRadius } from '@/theme';
 import type { PresenceStatus } from '@classitin/shared';
 import type { Transport } from 'mediasoup-client/types';
@@ -37,6 +42,12 @@ export function StudentSessionScreen({ route, navigation }: Props) {
   const { initDevice, getSendTransport, getRecvTransport, cleanup: cleanupMedia } = useMediasoup(sessionId ?? '');
   const { participants, updateMyStatus, initRoster } = usePresence(sessionId);
   const { isCapturing, startCapture, stopCapture } = useScreenCapture();
+
+  // Voice events (student receives broadcast/private calls)
+  const { isBroadcasting, inPrivateCall, privateCallFromName } = useVoiceEvents(sessionId);
+
+  // Chat
+  const { messages, unreadCount, isOpen: isChatOpen, sendMessage, toggleOpen: toggleChat } = useChat(sessionId);
 
   const sendTransportRef = useRef<Transport | null>(null);
   const recvTransportRef = useRef<Transport | null>(null);
@@ -68,19 +79,16 @@ export function StudentSessionScreen({ route, navigation }: Props) {
   const joinedRef = useRef(false);
   const joiningRef = useRef(false);
 
-  // Join session on mount, leave on unmount
+  // Join session on mount
   useEffect(() => {
     if (!isConnected || !sessionId || !roomId) return;
-    if (joinedRef.current || joiningRef.current) return; // Already joined or in progress
+    if (joinedRef.current || joiningRef.current) return;
 
     joiningRef.current = true;
     const socket = getSocket();
 
-    console.log('[StudentSession] Emitting room:join', { roomId, sessionId });
-
     socket.emit('room:join', { roomId, sessionId }, async (response: Record<string, unknown>) => {
       if (response.error) {
-        console.error('[StudentSession] room:join error:', response.error);
         joiningRef.current = false;
         Alert.alert('Error', response.error as string);
         return;
@@ -93,7 +101,6 @@ export function StudentSessionScreen({ route, navigation }: Props) {
         const transport = await getRecvTransport();
         recvTransportRef.current = transport;
 
-        // Pre-create send transport for screen sharing
         try {
           const sendT = await getSendTransport();
           sendTransportRef.current = sendT;
@@ -124,14 +131,12 @@ export function StudentSessionScreen({ route, navigation }: Props) {
         joinedRef.current = true;
         joiningRef.current = false;
         setJoined(true);
-        console.log('[StudentSession] Joined successfully');
       } catch (err) {
         console.error('[StudentSession] Error during join setup:', err);
         joiningRef.current = false;
         Alert.alert('Error', 'Failed to set up session. Try going back and rejoining.');
       }
     });
-    // No cleanup here — cleanup is handled by the unmount effect below
   }, [isConnected, sessionId, roomId]);
 
   // Separate unmount-only cleanup
@@ -152,7 +157,7 @@ export function StudentSessionScreen({ route, navigation }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Stream event listeners — separate from join to avoid stale closures
+  // Stream event listeners
   useEffect(() => {
     if (!joined || !sessionId) return;
     const socket = getSocket();
@@ -197,9 +202,7 @@ export function StudentSessionScreen({ route, navigation }: Props) {
 
       const transport = sendTransportRef.current ?? await getSendTransport();
       sendTransportRef.current = transport;
-      console.log('[StudentSession] Producing screen, transport id:', transport.id, 'track:', track.id, 'readyState:', track.readyState);
-      const producer = await produceScreen(transport, track, false);
-      console.log('[StudentSession] Producer created!', 'producerId:', producer.id, 'kind:', producer.kind, 'paused:', producer.paused);
+      const producer = await produceScreen(transport, track, true);
       setLocalProducerId(producer.id);
 
       track.addEventListener('ended', () => {
@@ -227,6 +230,16 @@ export function StudentSessionScreen({ route, navigation }: Props) {
     updateMyStatus(status);
   }, [updateMyStatus]);
 
+  const handleEndVoiceCall = useCallback(() => {
+    if (!sessionId) return;
+    try {
+      const socket = getSocket();
+      socket.emit('voice:call-end', { sessionId, targetUserId: null });
+    } catch {
+      // ignore
+    }
+  }, [sessionId]);
+
   if (!currentRoom || !currentSession) {
     return (
       <View style={styles.loading}>
@@ -245,6 +258,9 @@ export function StudentSessionScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
+      {/* Connection Banner */}
+      <ConnectionBanner />
+
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -254,6 +270,15 @@ export function StudentSessionScreen({ route, navigation }: Props) {
             <Text style={styles.headerSubtitle}>{currentSession.title ?? 'Live Session'}</Text>
           </View>
         </View>
+        {/* Chat toggle */}
+        <TouchableOpacity style={styles.chatButton} onPress={toggleChat} activeOpacity={0.7}>
+          <Text style={styles.chatButtonText}>Chat</Text>
+          {unreadCount > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* Status bar */}
@@ -283,6 +308,14 @@ export function StudentSessionScreen({ route, navigation }: Props) {
           onStop={handleStopShare}
         />
       </View>
+
+      {/* Audio indicator */}
+      <AudioIndicator
+        isBroadcasting={isBroadcasting}
+        inPrivateCall={inPrivateCall}
+        callerName={privateCallFromName ?? undefined}
+        onEndCall={inPrivateCall ? handleEndVoiceCall : undefined}
+      />
 
       {/* Sharing indicator */}
       {localScreenTrack && (
@@ -317,13 +350,22 @@ export function StudentSessionScreen({ route, navigation }: Props) {
           </View>
         </View>
       )}
+
+      {/* Chat modal */}
+      <Modal visible={isChatOpen} animationType="slide" presentationStyle="pageSheet">
+        <ChatPanel
+          messages={messages}
+          onSend={sendMessage}
+          onClose={toggleChat}
+        />
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.gray[50] },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: colors.gray[900] },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.gray[900] },
   loadingText: { color: colors.gray[400] },
   header: {
     flexDirection: 'row',
@@ -331,9 +373,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.md,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray[900],
     borderBottomWidth: 1,
-    borderBottomColor: colors.gray[100],
+    borderBottomColor: colors.gray[800],
   },
   headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   liveDot: {
@@ -342,17 +384,39 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: colors.emerald[500],
   },
-  headerTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.gray[900] },
-  headerSubtitle: { fontSize: fontSize.xs, color: colors.gray[500], marginTop: 1 },
+  headerTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.white },
+  headerSubtitle: { fontSize: fontSize.xs, color: colors.gray[400], marginTop: 1 },
+  chatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.gray[800],
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.gray[700],
+  },
+  chatButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.gray[300] },
+  unreadBadge: {
+    backgroundColor: colors.primary[500],
+    borderRadius: borderRadius.full,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  unreadText: { fontSize: 10, fontWeight: '800', color: colors.white },
   statusBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.sm,
-    backgroundColor: colors.white,
+    backgroundColor: colors.gray[900],
     borderBottomWidth: 1,
-    borderBottomColor: colors.gray[100],
+    borderBottomColor: colors.gray[800],
   },
   statusButtons: {
     flexDirection: 'row',
@@ -362,41 +426,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.lg,
-    backgroundColor: colors.gray[100],
+    backgroundColor: colors.gray[800],
   },
   statusButtonActiveGreen: {
-    backgroundColor: colors.emerald[50],
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderWidth: 1,
-    borderColor: colors.emerald[200],
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   statusButtonActiveAmber: {
-    backgroundColor: colors.amber[50],
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
     borderWidth: 1,
-    borderColor: colors.amber[200],
+    borderColor: 'rgba(245, 158, 11, 0.3)',
   },
   statusButtonText: {
     fontSize: fontSize.sm,
     fontWeight: '600',
-    color: colors.gray[500],
+    color: colors.gray[400],
   },
   statusButtonTextActiveGreen: {
-    color: colors.emerald[700],
+    color: colors.emerald[500],
   },
   statusButtonTextActiveAmber: {
-    color: colors.amber[700],
+    color: colors.amber[500],
   },
   sharingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     marginHorizontal: spacing.xl,
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderRadius: borderRadius.md,
-    backgroundColor: colors.primary[50],
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
     borderWidth: 1,
-    borderColor: colors.primary[100],
+    borderColor: 'rgba(99, 102, 241, 0.2)',
   },
   sharingDot: {
     width: 8,
@@ -407,7 +471,7 @@ const styles = StyleSheet.create({
   sharingText: {
     fontSize: fontSize.sm,
     fontWeight: '600',
-    color: colors.primary[700],
+    color: colors.primary[400],
   },
   teacherSection: {
     flex: 1,
@@ -417,7 +481,7 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: fontSize.xs,
     fontWeight: '700',
-    color: colors.gray[400],
+    color: colors.gray[500],
     letterSpacing: 1,
     marginBottom: spacing.sm,
   },
@@ -425,9 +489,9 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
-    backgroundColor: colors.gray[900],
+    backgroundColor: colors.black,
     borderWidth: 1,
-    borderColor: colors.gray[200],
+    borderColor: colors.gray[800],
   },
   teacherPlaceholder: {
     flex: 1,
@@ -448,6 +512,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: colors.black,
     borderWidth: 1,
-    borderColor: colors.gray[200],
+    borderColor: colors.gray[800],
   },
 });

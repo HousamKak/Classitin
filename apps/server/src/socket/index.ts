@@ -5,6 +5,7 @@ import { registerRoomHandlers } from './handlers/roomHandler.js';
 import { registerSignalingHandlers } from './handlers/signalingHandler.js';
 import { registerPresenceHandlers } from './handlers/presenceHandler.js';
 import { registerSessionHandlers } from './handlers/sessionHandler.js';
+import { registerChatHandlers } from './handlers/chatHandler.js';
 import { presenceService } from '../services/presence.service.js';
 import { roomManager } from '../mediasoup/roomManager.js';
 import { config } from '../config/index.js';
@@ -44,6 +45,7 @@ export function createSocketServer(httpServer: HttpServer): SocketServer {
     registerSignalingHandlers(socket, io);
     registerPresenceHandlers(socket, io);
     registerSessionHandlers(socket, io);
+    registerChatHandlers(socket, io);
 
     socket.on('disconnect', () => {
       const userId = socket.data.userId;

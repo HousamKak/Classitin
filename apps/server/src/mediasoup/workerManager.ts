@@ -28,6 +28,19 @@ class WorkerManager {
     return this.workers.length;
   }
 
+  async getResourceUsage(): Promise<Array<{ pid: number; usage: mediasoup.types.WorkerResourceUsage }>> {
+    const stats = [];
+    for (const worker of this.workers) {
+      try {
+        const usage = await worker.getResourceUsage();
+        stats.push({ pid: worker.pid, usage });
+      } catch {
+        // Worker may have died
+      }
+    }
+    return stats;
+  }
+
   async close(): Promise<void> {
     for (const worker of this.workers) {
       worker.close();

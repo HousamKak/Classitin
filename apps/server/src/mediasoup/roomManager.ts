@@ -1,5 +1,5 @@
 import type mediasoup from 'mediasoup';
-import { routerOptions, webRtcTransportOptions } from '../config/mediasoup.js';
+import { routerOptions, webRtcTransportOptions, getIceServers } from '../config/mediasoup.js';
 import { workerManager } from './workerManager.js';
 import { logger } from '../utils/logger.js';
 
@@ -76,12 +76,15 @@ class RoomManager {
       peer.recvTransport = transport;
     }
 
+    const iceServers = getIceServers();
+
     return {
       id: transport.id,
       iceParameters: transport.iceParameters,
       iceCandidates: transport.iceCandidates,
       dtlsParameters: transport.dtlsParameters,
       sctpParameters: transport.sctpParameters,
+      ...(iceServers.length > 0 ? { iceServers } : {}),
     };
   }
 
@@ -180,6 +183,55 @@ class RoomManager {
       if (producer) return { producer, userId };
     }
     return undefined;
+  }
+
+  getStats(): {
+    rooms: number;
+    peers: number;
+    producers: number;
+    consumers: number;
+    details: Array<{
+      sessionId: string;
+      peers: number;
+      producers: number;
+      consumers: number;
+    }>;
+  } {
+    let totalPeers = 0;
+    let totalProducers = 0;
+    let totalConsumers = 0;
+    const details: Array<{
+      sessionId: string;
+      peers: number;
+      producers: number;
+      consumers: number;
+    }> = [];
+
+    for (const [sessionId, room] of this.rooms) {
+      let roomProducers = 0;
+      let roomConsumers = 0;
+      for (const peer of room.peers.values()) {
+        roomProducers += peer.producers.size;
+        roomConsumers += peer.consumers.size;
+      }
+      totalPeers += room.peers.size;
+      totalProducers += roomProducers;
+      totalConsumers += roomConsumers;
+      details.push({
+        sessionId,
+        peers: room.peers.size,
+        producers: roomProducers,
+        consumers: roomConsumers,
+      });
+    }
+
+    return {
+      rooms: this.rooms.size,
+      peers: totalPeers,
+      producers: totalProducers,
+      consumers: totalConsumers,
+      details,
+    };
   }
 
   findPeerByTransportId(sessionId: string, transportId: string): PeerState | undefined {

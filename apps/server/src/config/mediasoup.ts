@@ -16,12 +16,18 @@ export const numWorkers = Math.min(
 export const routerOptions = {
   mediaCodecs: [
     {
-      kind: 'video',
+      kind: 'audio' as const,
+      mimeType: 'audio/opus',
+      clockRate: 48000,
+      channels: 2,
+    },
+    {
+      kind: 'video' as const,
       mimeType: 'video/VP8',
       clockRate: 90000,
     },
     {
-      kind: 'video',
+      kind: 'video' as const,
       mimeType: 'video/H264',
       clockRate: 90000,
       parameters: {
@@ -36,22 +42,31 @@ export const routerOptions = {
 export const webRtcTransportOptions = {
   listenInfos: [
     {
-      protocol: 'udp',
+      protocol: 'udp' as const,
       ip: '0.0.0.0',
       announcedAddress: config.mediasoup.announcedIp,
     },
     {
-      protocol: 'tcp',
+      protocol: 'tcp' as const,
       ip: '0.0.0.0',
       announcedAddress: config.mediasoup.announcedIp,
     },
   ],
-  initialAvailableOutgoingBitrate: 800_000,
-  maxIncomingBitrate: 1_500_000,
+  initialAvailableOutgoingBitrate: 1_000_000,
+  maxIncomingBitrate: 3_000_000,
 };
 
-export const simulcastEncodings = [
-  { rid: 'r0', maxBitrate: 100_000, scaleResolutionDownBy: 4 },
-  { rid: 'r1', maxBitrate: 300_000, scaleResolutionDownBy: 2 },
-  { rid: 'r2', maxBitrate: 1_200_000, scaleResolutionDownBy: 1 },
-];
+// Build ICE servers for TURN relay (passed to clients, not to mediasoup server)
+export function getIceServers(): Array<{ urls: string; username?: string; credential?: string }> {
+  const servers: Array<{ urls: string; username?: string; credential?: string }> = [];
+
+  if (config.mediasoup.turnUrl) {
+    servers.push({
+      urls: config.mediasoup.turnUrl,
+      username: config.mediasoup.turnUsername || undefined,
+      credential: config.mediasoup.turnCredential || undefined,
+    });
+  }
+
+  return servers;
+}

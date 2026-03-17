@@ -17,6 +17,11 @@ export function connectSocket(token: string): Socket {
     auth: { token },
     transports: ['websocket'],
     autoConnect: true,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
+    timeout: 20000,
     rejectUnauthorized: false, // Accept self-signed certs in dev
   });
 

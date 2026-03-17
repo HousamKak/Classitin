@@ -1,4 +1,11 @@
-const BASE_URL = `https://${window.location.hostname}:3001/api/v1`;
+function getBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) {
+    return `${import.meta.env.VITE_API_URL as string}/api/v1`;
+  }
+  return `https://${window.location.hostname}:3001/api/v1`;
+}
+
+const BASE_URL = getBaseUrl();
 
 async function request(method: string, path: string, body?: unknown) {
   const token = localStorage.getItem('accessToken');

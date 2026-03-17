@@ -87,6 +87,14 @@ class PresenceService {
   clearSession(sessionId: string): void {
     this.sessions.delete(sessionId);
   }
+
+  getStats(): { activeSessions: number; totalUsers: number } {
+    let totalUsers = 0;
+    for (const session of this.sessions.values()) {
+      totalUsers += session.size;
+    }
+    return { activeSessions: this.sessions.size, totalUsers };
+  }
 }
 
 export const presenceService = new PresenceService();

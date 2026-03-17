@@ -1,6 +1,7 @@
 import { StudentThumbnail } from './StudentThumbnail';
 import type { ParticipantInfo } from '@classitin/shared';
 import { useMediaStore } from '@/stores/mediaStore';
+import { Users } from 'lucide-react';
 
 interface StudentGridProps {
   participants: Map<string, ParticipantInfo>;
@@ -15,13 +16,6 @@ export function StudentGrid({ participants, onFocusStudent }: StudentGridProps) 
   const getTrackForUser = (userId: string): MediaStreamTrack | null => {
     for (const info of consumers.values()) {
       if (info.userId === userId && info.kind === 'video') {
-        console.log('[StudentGrid] Found track for user:', userId, {
-          consumerId: info.consumerId,
-          trackId: info.track?.id,
-          readyState: info.track?.readyState,
-          muted: info.track?.muted,
-          enabled: info.track?.enabled,
-        });
         return info.track;
       }
     }
@@ -30,8 +24,12 @@ export function StudentGrid({ participants, onFocusStudent }: StudentGridProps) 
 
   if (students.length === 0) {
     return (
-      <div className="flex items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50/50 py-12">
-        <p className="text-sm text-gray-400">No students have joined yet</p>
+      <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-800 bg-gray-900/50 py-16 gap-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gray-800">
+          <Users className="h-6 w-6 text-gray-600" />
+        </div>
+        <p className="text-sm text-gray-500">No students have joined yet</p>
+        <p className="text-xs text-gray-600">Students will appear here when they connect</p>
       </div>
     );
   }

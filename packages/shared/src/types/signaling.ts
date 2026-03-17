@@ -1,6 +1,6 @@
 import type { UserRole, PresenceStatus, ParticipantInfo } from './user.js';
 import type { Session } from './room.js';
-import type { StreamKind, StreamSource } from './stream.js';
+import type { StreamKind, StreamSource, AudioTarget } from './stream.js';
 // Standalone media types — compatible with both mediasoup and mediasoup-client
 // without importing from either package (keeps shared package environment-neutral).
 export type RtpCapabilities = Record<string, unknown>;
@@ -80,7 +80,7 @@ export interface TransportProducePayload {
   transportId: string;
   kind: StreamKind;
   rtpParameters: RtpParameters;
-  appData: { source: StreamSource };
+  appData: { source: StreamSource; target?: AudioTarget; targetUserId?: string };
 }
 
 export interface TransportProduceAck {
@@ -141,7 +141,7 @@ export interface StreamStartedPayload {
   userId: string;
   producerId: string;
   kind: StreamKind;
-  appData: { source: StreamSource };
+  appData: { source: StreamSource; target?: AudioTarget; targetUserId?: string };
 }
 
 export interface StreamPausedPayload {
@@ -169,6 +169,59 @@ export interface SessionEndedPayload {
   sessionId: string;
 }
 
+// --- Chat Events ---
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  userId: string;
+  displayName: string;
+  role: UserRole;
+  text: string;
+  isAnnouncement: boolean;
+  timestamp: number;
+}
+
+export interface ChatSendPayload {
+  sessionId: string;
+  text: string;
+  isAnnouncement?: boolean;
+}
+
+export interface ChatMessagePayload {
+  message: ChatMessage;
+}
+
+// --- Voice Events ---
+
+export interface VoiceCallPayload {
+  sessionId: string;
+  targetUserId: string;
+}
+
+export interface VoiceCallEndPayload {
+  sessionId: string;
+  targetUserId?: string;
+}
+
+export interface VoiceCallStartedPayload {
+  fromUserId: string;
+  fromDisplayName: string;
+}
+
+export interface VoiceCallEndedPayload {
+  fromUserId: string;
+}
+
+export interface VoiceBroadcastStartedPayload {
+  userId: string;
+  producerId: string;
+}
+
+export interface VoiceBroadcastEndedPayload {
+  userId: string;
+}
+
 // --- Event Maps ---
 
 export interface ClientToServerEvents {
@@ -187,6 +240,9 @@ export interface ClientToServerEvents {
   'producer:pause': (payload: ProducerPausePayload, ack: (response: object) => void) => void;
   'producer:resume': (payload: ProducerResumePayload, ack: (response: object) => void) => void;
   'producer:close': (payload: ProducerClosePayload, ack: (response: object) => void) => void;
+  'voice:call-start': (payload: VoiceCallPayload, ack: (response: object) => void) => void;
+  'voice:call-end': (payload: VoiceCallEndPayload) => void;
+  'chat:send': (payload: ChatSendPayload) => void;
 }
 
 export interface ServerToClientEvents {
@@ -200,4 +256,10 @@ export interface ServerToClientEvents {
   'stream:stopped': (payload: StreamStoppedPayload) => void;
   'session:started': (payload: SessionStartedPayload) => void;
   'session:ended': (payload: SessionEndedPayload) => void;
+  'voice:call-incoming': (payload: VoiceCallStartedPayload) => void;
+  'voice:call-ended': (payload: VoiceCallEndedPayload) => void;
+  'voice:broadcast-started': (payload: VoiceBroadcastStartedPayload) => void;
+  'voice:broadcast-ended': (payload: VoiceBroadcastEndedPayload) => void;
+  'consume:closed': (payload: { consumerId: string }) => void;
+  'chat:message': (payload: ChatMessagePayload) => void;
 }

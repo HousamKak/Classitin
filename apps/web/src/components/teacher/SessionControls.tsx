@@ -1,4 +1,4 @@
-import { Play, Square, Radio } from 'lucide-react';
+import { Play, Square } from 'lucide-react';
 import type { Session } from '@classitin/shared';
 
 interface SessionControlsProps {
@@ -12,16 +12,16 @@ export function SessionControls({ session, onStart, onEnd }: SessionControlsProp
     <div className="flex items-center gap-3">
       {session?.status === 'ACTIVE' ? (
         <>
-          <div className="hidden sm:flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1.5">
+          <div className="hidden sm:flex items-center gap-2 rounded-full bg-emerald-500/10 px-3 py-1.5">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
-            <span className="text-xs font-semibold text-emerald-700">Live</span>
+            <span className="text-xs font-semibold text-emerald-400">Live</span>
           </div>
           <button
             onClick={onEnd}
-            className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-100 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
+            className="flex items-center gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-500/20 transition-colors"
           >
             <Square className="h-3 w-3 fill-current" />
             End

@@ -20,21 +20,19 @@ export function TeacherStreamViewer({ teacherUserId }: TeacherStreamViewerProps)
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-black shadow-sm">
-      <div className="relative aspect-video">
-        {track ? (
-          <VideoRenderer track={track} className="h-full w-full object-contain" />
-        ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gray-900">
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-800">
-              <Monitor className="h-7 w-7 text-gray-600" />
-            </div>
-            <p className="text-sm text-gray-500">
-              {teacherUserId ? 'Teacher is not sharing their screen' : 'Waiting for teacher to join...'}
-            </p>
+    <div className="overflow-hidden rounded-2xl border border-gray-800 bg-black shadow-lg">
+      {track ? (
+        <VideoRenderer track={track} className="w-full object-contain" />
+      ) : (
+        <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 bg-gray-900">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-800">
+            <Monitor className="h-7 w-7 text-gray-600" />
           </div>
-        )}
-      </div>
+          <p className="text-sm text-gray-500">
+            {teacherUserId ? 'Teacher is not sharing their screen' : 'Waiting for teacher to join...'}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

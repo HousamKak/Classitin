@@ -37,11 +37,6 @@ async function main() {
   }));
   app.use(express.json());
 
-  // Health check
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', workers: workerManager.workerCount });
-  });
-
   // Mount API routes
   app.use('/api/v1', apiRoutes);
 
@@ -76,8 +71,10 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     logger.info('Shutting down...');
+    io.close();
     await workerManager.close();
     await prisma.$disconnect();
+    plainHttpServer.close();
     httpServer.close();
     process.exit(0);
   };

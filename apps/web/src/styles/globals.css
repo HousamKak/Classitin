@@ -50,6 +50,14 @@ body {
   background: #94a3b8;
 }
 
+/* Dark scrollbar for session views */
+.session-dark ::-webkit-scrollbar-thumb {
+  background: #374151;
+}
+.session-dark ::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
 /* Video element defaults */
 video {
   background: #000;
@@ -62,4 +70,40 @@ video {
 }
 .animate-live-pulse {
   animation: live-pulse 2s ease-in-out infinite;
+}
+
+/* Glow animation for active sharing border */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(99, 102, 241, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(99, 102, 241, 0.5); }
+}
+.animate-glow {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+/* Needs help attention animation */
+@keyframes help-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(245, 158, 11, 0); }
+}
+.animate-help-pulse {
+  animation: help-pulse 2s ease-in-out infinite;
+}
+
+/* Skeleton loading shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #1f2937 25%, #374151 50%, #1f2937 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+.skeleton-light {
+  background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
 }

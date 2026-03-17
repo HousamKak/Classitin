@@ -21,6 +21,9 @@ export const config = {
     minPort: parseInt(process.env.MEDIASOUP_MIN_PORT || '40000', 10),
     maxPort: parseInt(process.env.MEDIASOUP_MAX_PORT || '49999', 10),
     numWorkers: parseInt(process.env.MEDIASOUP_NUM_WORKERS || '2', 10),
+    turnUrl: process.env.TURN_URL || '',
+    turnUsername: process.env.TURN_USERNAME || '',
+    turnCredential: process.env.TURN_CREDENTIAL || '',
   },
 
   cors: {

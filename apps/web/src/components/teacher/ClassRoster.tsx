@@ -14,19 +14,19 @@ export function ClassRoster({ participants, onFocusStudent }: ClassRosterProps) 
   return (
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
           Roster
         </h3>
-        <span className="text-xs font-medium text-gray-400">{students.length}</span>
+        <span className="text-xs font-medium text-gray-600">{students.length}</span>
       </div>
 
       {teacher && (
-        <div className="rounded-xl bg-primary-50 p-3">
+        <div className="rounded-xl bg-primary-500/10 p-3">
           <div className="flex items-center gap-2.5">
             <Avatar name={teacher.displayName} size="sm" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-gray-800 truncate">{teacher.displayName}</p>
-              <div className="flex items-center gap-1 text-[11px] text-primary-600">
+              <p className="text-sm font-medium text-gray-200 truncate">{teacher.displayName}</p>
+              <div className="flex items-center gap-1 text-[11px] text-primary-400">
                 <Crown className="h-3 w-3" />
                 Teacher
               </div>
@@ -46,26 +46,26 @@ export function ClassRoster({ participants, onFocusStudent }: ClassRosterProps) 
               onClick={() => onFocusStudent(student.userId)}
               className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${
                 needsHelp
-                  ? 'bg-amber-50 hover:bg-amber-100'
-                  : 'hover:bg-gray-50'
+                  ? 'bg-amber-500/10 hover:bg-amber-500/15'
+                  : 'hover:bg-gray-800'
               }`}
             >
               <div className="relative">
                 <Avatar name={student.displayName} size="sm" />
-                <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white ${
-                  isOnline ? 'bg-emerald-500' : 'bg-gray-300'
+                <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-gray-900 ${
+                  isOnline ? 'bg-emerald-500' : 'bg-gray-600'
                 }`} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-800 truncate">{student.displayName}</p>
+                <p className="text-sm font-medium text-gray-200 truncate">{student.displayName}</p>
                 <div className="flex items-center gap-2">
                   {needsHelp && (
-                    <span className="flex items-center gap-0.5 text-[11px] font-semibold text-amber-600">
+                    <span className="flex items-center gap-0.5 text-[11px] font-semibold text-amber-400">
                       <AlertCircle className="h-3 w-3" /> Needs help
                     </span>
                   )}
                   {student.isSharing && (
-                    <span className="flex items-center gap-0.5 text-[11px] font-medium text-emerald-600">
+                    <span className="flex items-center gap-0.5 text-[11px] font-medium text-emerald-400">
                       <Monitor className="h-3 w-3" /> Sharing
                     </span>
                   )}
@@ -75,7 +75,7 @@ export function ClassRoster({ participants, onFocusStudent }: ClassRosterProps) 
           );
         })}
         {students.length === 0 && (
-          <p className="py-6 text-center text-xs text-gray-400">No students yet</p>
+          <p className="py-6 text-center text-xs text-gray-600">No students yet</p>
         )}
       </div>
     </div>

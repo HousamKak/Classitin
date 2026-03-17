@@ -8,10 +8,10 @@ interface StatusBadgeProps {
 }
 
 const STATUS_CONFIG: Record<PresenceStatus, { color: string; dotColor: string; label: string }> = {
-  ONLINE: { color: colors.emerald[700], dotColor: colors.emerald[500], label: 'Online' },
+  ONLINE: { color: colors.emerald[500], dotColor: colors.emerald[500], label: 'Online' },
   IDLE: { color: colors.gray[400], dotColor: colors.gray[400], label: 'Idle' },
-  NEEDS_HELP: { color: colors.amber[600], dotColor: colors.amber[500], label: 'Needs Help' },
-  OFFLINE: { color: colors.gray[400], dotColor: colors.gray[300], label: 'Offline' },
+  NEEDS_HELP: { color: colors.amber[500], dotColor: colors.amber[500], label: 'Needs Help' },
+  OFFLINE: { color: colors.gray[500], dotColor: colors.gray[500], label: 'Offline' },
 };
 
 export function StatusBadge({ status, isSharing }: StatusBadgeProps) {
@@ -46,7 +46,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   liveBadge: {
-    backgroundColor: colors.emerald[50],
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -54,6 +54,6 @@ const styles = StyleSheet.create({
   liveText: {
     fontSize: 9,
     fontWeight: '800',
-    color: colors.emerald[600],
+    color: colors.emerald[500],
   },
 });

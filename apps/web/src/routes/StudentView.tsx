@@ -12,10 +12,15 @@ import { TeacherStreamViewer } from '@/components/student/TeacherStreamViewer';
 import { ScreenShareToggle } from '@/components/student/ScreenShareToggle';
 import { SharingStatusIndicator } from '@/components/student/SharingStatusIndicator';
 import { StudentSessionPanel } from '@/components/student/StudentSessionPanel';
+import { AudioIndicator } from '@/components/student/AudioIndicator';
 import { LoadingSpinner } from '@/components/common/LoadingSpinner';
+import { ChatPanel } from '@/components/common/ChatPanel';
+import { useVoiceEvents } from '@/hooks/useVoiceEvents';
+import { useChat } from '@/hooks/useChat';
 import type { Transport } from 'mediasoup-client/types';
 import type { PresenceStatus } from '@classitin/shared';
-import { Radio, Monitor } from 'lucide-react';
+import { Radio, Monitor, MessageCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
   typeof navigator !== 'undefined' ? navigator.userAgent : ''
@@ -37,6 +42,19 @@ export function StudentView() {
   const recvTransportRef = useRef<Transport | null>(null);
   const [joined, setJoined] = useState(false);
   const [myStatus, setMyStatus] = useState<PresenceStatus>('ONLINE');
+  const { isBroadcasting, inPrivateCall, privateCallFromName, playAudioTrack } = useVoiceEvents(sessionId);
+  const { messages, unreadCount, isOpen: chatOpen, sendMessage, toggleOpen: toggleChat } = useChat(sessionId);
+  const [showChat, setShowChat] = useState(false);
+
+  // Auto-play audio consumers through speakers
+  const consumers = useMediaStore((s) => s.consumers);
+  useEffect(() => {
+    for (const [consumerId, info] of consumers) {
+      if (info.kind === 'audio') {
+        playAudioTrack(consumerId, info.track);
+      }
+    }
+  }, [consumers, playAudioTrack]);
 
   const teacherUserId = Array.from(participants.values()).find(
     (p) => p.role === 'TEACHER'
@@ -62,7 +80,6 @@ export function StudentView() {
       const transport = await getRecvTransport();
       recvTransportRef.current = transport;
 
-      // Pre-create send transport for screen sharing
       try {
         const sendTransport = await getSendTransport();
         sendTransportRef.current = sendTransport;
@@ -116,6 +133,8 @@ export function StudentView() {
         socket.off('stream:started');
         cleanupMedia();
         clearAll();
+        sendTransportRef.current = null;
+        recvTransportRef.current = null;
         setJoined(false);
       }
     };
@@ -139,11 +158,11 @@ export function StudentView() {
     return (
       <div className="flex h-[calc(100vh-49px)] items-center justify-center">
         <div className="text-center">
-          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 mb-4">
-            <Radio className="h-7 w-7 text-gray-400" />
+          <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-900 border border-gray-800 mb-4">
+            <Radio className="h-7 w-7 text-gray-600" />
           </div>
-          <p className="text-sm font-medium text-gray-500">Waiting for teacher to start session</p>
-          <p className="mt-1 text-xs text-gray-400">You'll be able to join once it begins</p>
+          <p className="text-sm font-medium text-gray-400">Waiting for teacher to start session</p>
+          <p className="mt-1 text-xs text-gray-600">You'll be able to join once it begins</p>
         </div>
       </div>
     );
@@ -152,17 +171,22 @@ export function StudentView() {
   if (!joined) return <LoadingSpinner />;
 
   return (
-    <div className="h-[calc(100vh-49px)] flex flex-col">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="h-[calc(100vh-49px)] flex flex-col"
+    >
       {/* Top bar */}
-      <div className="flex items-center justify-between border-b border-gray-100 bg-white px-4 md:px-6 py-3">
+      <div className="flex items-center justify-between border-b border-gray-800 bg-gray-900/80 backdrop-blur-sm px-4 md:px-6 py-3">
         <div className="flex items-center gap-3">
           <div className="relative">
             <Radio className="h-4 w-4 text-emerald-500" />
             <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 animate-live-pulse" />
           </div>
           <div>
-            <h2 className="text-base font-semibold text-gray-900">{currentRoom.name}</h2>
-            <p className="text-xs text-gray-400">{currentSession.title ?? 'Live Session'}</p>
+            <h2 className="text-base font-semibold text-gray-100">{currentRoom.name}</h2>
+            <p className="text-xs text-gray-500">{currentSession.title ?? 'Live Session'}</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -173,30 +197,69 @@ export function StudentView() {
               getSendTransport={getSendTransportCb}
             />
           )}
+          <button
+            onClick={() => { setShowChat(!showChat); if (!showChat) toggleChat(); }}
+            className={`relative flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
+              showChat ? 'bg-primary-500/15 text-primary-400' : 'text-gray-500 hover:bg-gray-800'
+            }`}
+            title="Toggle chat"
+          >
+            <MessageCircle className="h-4 w-4" />
+            {unreadCount > 0 && !showChat && (
+              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-500 px-1 text-[9px] font-bold text-white">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
-        {/* Mobile info */}
-        {isMobile && (
-          <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-100 px-4 py-2.5">
-            <Monitor className="h-4 w-4 text-blue-500 flex-shrink-0" />
-            <p className="text-xs text-blue-600">Screen sharing requires a desktop browser. You can still watch the teacher's screen here.</p>
-          </div>
-        )}
-        {/* Sharing indicator */}
-        <SharingStatusIndicator />
+      {/* Content + chat */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Main content */}
+        <div className="flex-1 overflow-auto p-4 md:p-6 space-y-4">
+          {/* Mobile info */}
+          {isMobile && (
+            <div className="flex items-center gap-2 rounded-xl bg-blue-500/10 border border-blue-500/20 px-4 py-2.5">
+              <Monitor className="h-4 w-4 text-blue-400 flex-shrink-0" />
+              <p className="text-xs text-blue-300">Screen sharing requires a desktop browser. You can still watch the teacher's screen here.</p>
+            </div>
+          )}
+          {/* Voice indicators */}
+          <AudioIndicator
+            isBroadcasting={isBroadcasting}
+            inPrivateCall={inPrivateCall}
+            callerName={privateCallFromName ?? undefined}
+          />
 
-        {/* Teacher's screen */}
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-3">
-            <Monitor className="h-4 w-4 text-gray-400" />
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Teacher's Screen</h3>
+          {/* Sharing indicator */}
+          <SharingStatusIndicator />
+
+          {/* Teacher's screen */}
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-3">
+              <Monitor className="h-4 w-4 text-gray-500" />
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Teacher's Screen</h3>
+            </div>
+            <TeacherStreamViewer teacherUserId={teacherUserId} />
           </div>
-          <TeacherStreamViewer teacherUserId={teacherUserId} />
         </div>
+
+        {/* Chat panel */}
+        <AnimatePresence>
+          {showChat && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 300, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              transition={{ duration: 0.2, ease: 'easeInOut' }}
+              className="hidden md:block overflow-hidden border-l border-gray-800 bg-gray-900/80 backdrop-blur-sm"
+            >
+              <ChatPanel messages={messages} onSend={sendMessage} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-    </div>
+    </motion.div>
   );
 }

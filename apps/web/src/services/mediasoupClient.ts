@@ -1,7 +1,7 @@
 import * as mediasoupClient from 'mediasoup-client';
 import type { Device, Transport, Producer, Consumer } from 'mediasoup-client/types';
 import { getSocket } from './socket';
-import { SIMULCAST_ENCODINGS } from '@classitin/shared';
+import { SIMULCAST_ENCODINGS, SCREEN_CODEC_OPTIONS, TEACHER_CODEC_OPTIONS } from '@classitin/shared';
 
 let device: Device | null = null;
 
@@ -109,8 +109,12 @@ export async function produceScreen(
       rid: e.rid,
       maxBitrate: e.maxBitrate,
       scaleResolutionDownBy: e.scaleResolutionDownBy,
+      scalabilityMode: e.scalabilityMode,
     }));
-    params.codecOptions = { videoGoogleStartBitrate: 100 };
+    params.codecOptions = SCREEN_CODEC_OPTIONS;
+  } else {
+    // Teacher: single high-quality stream
+    params.codecOptions = TEACHER_CODEC_OPTIONS;
   }
 
   return transport.produce(params);
@@ -160,6 +164,18 @@ export async function consumeStream(
 export function setPreferredLayers(consumerId: string, spatialLayer: number, temporalLayer?: number) {
   const socket = getSocket();
   socket.emit('consume:set-preferred-layers', { consumerId, spatialLayer, temporalLayer }, () => {});
+}
+
+export async function produceAudio(
+  transport: Transport,
+  track: MediaStreamTrack,
+  target: 'broadcast' | 'private',
+  targetUserId?: string
+): Promise<Producer> {
+  return transport.produce({
+    track,
+    appData: { source: 'microphone', target, targetUserId },
+  });
 }
 
 export function closeProducer(producerId: string) {
