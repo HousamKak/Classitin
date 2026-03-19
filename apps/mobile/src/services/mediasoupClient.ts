@@ -1,7 +1,7 @@
 import * as mediasoupClient from 'mediasoup-client';
 import type { Device, Transport, Producer, Consumer } from 'mediasoup-client/types';
 import { getSocket } from './socket';
-import { SIMULCAST_ENCODINGS, SCREEN_CODEC_OPTIONS, TEACHER_CODEC_OPTIONS } from '@classitin/shared';
+import { MOBILE_SIMULCAST_ENCODINGS, SCREEN_CODEC_OPTIONS, TEACHER_CODEC_OPTIONS } from '@classitin/shared';
 
 let device: Device | null = null;
 
@@ -105,7 +105,7 @@ export async function produceScreen(
   };
 
   if (useSimulcast) {
-    params.encodings = SIMULCAST_ENCODINGS.map((e) => ({
+    params.encodings = MOBILE_SIMULCAST_ENCODINGS.map((e) => ({
       rid: e.rid,
       maxBitrate: e.maxBitrate,
       scaleResolutionDownBy: e.scaleResolutionDownBy,

@@ -2,13 +2,20 @@
   "expo": {
     "name": "Classitin",
     "slug": "classitin",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "default",
     "scheme": "classitin",
     "platforms": ["ios", "android"],
     "ios": {
       "bundleIdentifier": "com.classitin.mobile",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "deploymentTarget": "15.0",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Classitin needs camera access for video calls with your teacher.",
+        "NSMicrophoneUsageDescription": "Classitin needs microphone access for voice communication during class sessions.",
+        "UIBackgroundModes": ["voip", "audio"],
+        "CFBundleAllowMixedLocalizations": true
+      }
     },
     "android": {
       "package": "com.classitin.mobile",
@@ -21,7 +28,13 @@
       ]
     },
     "plugins": [
-      "@config-plugins/react-native-webrtc"
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Classitin needs camera access for video calls.",
+          "microphonePermission": "Classitin needs microphone access for voice communication."
+        }
+      ]
     ]
   }
 }

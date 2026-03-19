@@ -4,6 +4,12 @@ export const SIMULCAST_ENCODINGS = [
   { rid: 'r2', maxBitrate: 1_500_000, scaleResolutionDownBy: 1, scalabilityMode: 'L1T3' },
 ] as const;
 
+/** Lighter 2-layer simulcast for mobile — reduces encoding load */
+export const MOBILE_SIMULCAST_ENCODINGS = [
+  { rid: 'r0', maxBitrate: 150_000, scaleResolutionDownBy: 3, scalabilityMode: 'L1T2' },
+  { rid: 'r1', maxBitrate: 800_000, scaleResolutionDownBy: 1, scalabilityMode: 'L1T2' },
+] as const;
+
 export const SCREEN_CAPTURE_CONSTRAINTS = {
   video: {
     width: { ideal: 1280 },

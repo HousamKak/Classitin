@@ -20,5 +20,17 @@ apps/mobile/android/build/
 apps/mobile/android/.gradle/
 local.properties
 
+# iOS build outputs
+apps/mobile/ios/Pods/
+apps/mobile/ios/build/
+apps/mobile/ios/*.xcworkspace/xcuserdata/
+apps/mobile/ios/*.xcodeproj/xcuserdata/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.hmap
+*.ipa
+
 # Self-signed dev certs (regenerated per machine)
 infrastructure/certs/*.pem

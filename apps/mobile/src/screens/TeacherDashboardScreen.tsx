@@ -14,6 +14,7 @@ import { useVoiceEvents } from '@/hooks/useVoiceEvents';
 import { useChat } from '@/hooks/useChat';
 import { getSocket } from '@/services/socket';
 import { consumeStream, produceScreen, closeProducer, setPreferredLayers } from '@/services/mediasoupClient';
+import { THUMBNAIL_LAYER, HD_LAYER } from '@classitin/shared';
 import { RTCVideoView } from '@/components/RTCVideoView';
 import { StudentThumbnail } from '@/components/StudentThumbnail';
 import { StudentFocusView } from '@/components/StudentFocusView';
@@ -158,13 +159,13 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
     if (!focusedStudentId) return;
     for (const [, info] of consumers) {
       if (info.userId === focusedStudentId && info.kind === 'video') {
-        setPreferredLayers(info.consumerId, 2);
+        setPreferredLayers(info.consumerId, HD_LAYER.spatialLayer, HD_LAYER.temporalLayer);
       }
     }
     return () => {
       for (const [, info] of consumers) {
         if (info.userId === focusedStudentId && info.kind === 'video') {
-          setPreferredLayers(info.consumerId, 0);
+          setPreferredLayers(info.consumerId, THUMBNAIL_LAYER.spatialLayer, THUMBNAIL_LAYER.temporalLayer);
         }
       }
     };

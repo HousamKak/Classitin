@@ -22,6 +22,8 @@ config.resolver.blockList = [
   /\.git\/.*/,
   // Exclude android/ios build dirs within mobile
   new RegExp(path.resolve(projectRoot, 'android/app/build').replace(/[/\\]/g, '[/\\\\]') + '/.*'),
+  new RegExp(path.resolve(projectRoot, 'ios/Pods').replace(/[/\\]/g, '[/\\\\]') + '/.*'),
+  new RegExp(path.resolve(projectRoot, 'ios/build').replace(/[/\\]/g, '[/\\\\]') + '/.*'),
 ];
 
 // Resolve node_modules from both project and monorepo root

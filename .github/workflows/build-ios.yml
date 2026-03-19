@@ -1,0 +1,54 @@
+name: Build iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/shared/**'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'EAS build profile'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - development-simulator
+          - preview
+          - production
+
+concurrency:
+  group: build-ios-${{ github.ref }}-${{ inputs.profile || 'development' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build iOS (${{ inputs.profile || 'development' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build iOS on EAS
+        working-directory: apps/mobile
+        run: eas build --platform ios --profile ${{ inputs.profile || 'development' }} --non-interactive
