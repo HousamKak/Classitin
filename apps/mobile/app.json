@@ -14,7 +14,9 @@
         "NSCameraUsageDescription": "Classitin needs camera access for video calls with your teacher.",
         "NSMicrophoneUsageDescription": "Classitin needs microphone access for voice communication during class sessions.",
         "UIBackgroundModes": ["voip", "audio"],
-        "CFBundleAllowMixedLocalizations": true
+        "CFBundleAllowMixedLocalizations": true,
+        "RTCAppGroupIdentifier": "group.com.classitin.mobile",
+        "RTCScreenSharingExtension": "com.classitin.mobile.BroadcastExtension"
       }
     },
     "android": {
@@ -34,7 +36,8 @@
           "cameraPermission": "Classitin needs camera access for video calls.",
           "microphonePermission": "Classitin needs microphone access for voice communication."
         }
-      ]
+      ],
+      "./plugins/withBroadcastExtension"
     ]
   }
 }

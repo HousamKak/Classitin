@@ -42,6 +42,8 @@ export function TeacherDashboard() {
   const recvTransportRef = useRef<Transport | null>(null);
   const [recvTransport, setRecvTransport] = useState<Transport | null>(null);
   const [joined, setJoined] = useState(false);
+  const joinedRef = useRef(false);
+  const joiningRef = useRef(false);
   const [showRoster, setShowRoster] = useState(true);
 
   const { focusStudent, unfocusStudent, subscribeToProducer } = useStudentStreams(sessionId, recvTransport);
@@ -62,56 +64,73 @@ export function TeacherDashboard() {
   }, [roomId, fetchRoom]);
 
   useEffect(() => {
-    if (!isConnected || !sessionId || !roomId || joined) return;
+    if (!isConnected || !sessionId || !roomId) return;
+    if (joinedRef.current || joiningRef.current) return;
 
+    joiningRef.current = true;
     const socket = getSocket();
     socket.emit('room:join', { roomId, sessionId }, async (response: Record<string, unknown>) => {
       if (response.error) {
         console.error('Failed to join room:', response.error);
+        joiningRef.current = false;
         return;
       }
 
-      await initDevice(response.rtpCapabilities as Parameters<typeof initDevice>[0]);
-      initRoster(response.roster as Parameters<typeof initRoster>[0]);
+      try {
+        await initDevice(response.rtpCapabilities as Parameters<typeof initDevice>[0]);
+        initRoster(response.roster as Parameters<typeof initRoster>[0]);
 
-      const transport = await getRecvTransport();
-      recvTransportRef.current = transport;
-      setRecvTransport(transport);
+        const transport = await getRecvTransport();
+        recvTransportRef.current = transport;
+        setRecvTransport(transport);
 
-      const producers = response.existingProducers as Array<{ producerId: string; userId: string }>;
-      for (const p of producers) {
-        if (p.userId !== user?.id) {
-          try {
-            const consumer = await consumeStream(transport, sessionId!, p.producerId);
-            addConsumer({
-              consumerId: consumer.id,
-              producerId: p.producerId,
-              userId: p.userId,
-              track: consumer.track,
-              kind: consumer.kind,
-              paused: false,
-            });
-          } catch (err) {
-            console.error('Failed to consume existing producer:', err);
+        const producers = response.existingProducers as Array<{ producerId: string; userId: string }>;
+        for (const p of producers) {
+          if (p.userId !== user?.id) {
+            try {
+              const consumer = await consumeStream(transport, sessionId!, p.producerId);
+              addConsumer({
+                consumerId: consumer.id,
+                producerId: p.producerId,
+                userId: p.userId,
+                track: consumer.track,
+                kind: consumer.kind,
+                paused: false,
+              });
+            } catch (err) {
+              console.error('Failed to consume existing producer:', err);
+            }
           }
         }
+
+        joinedRef.current = true;
+        joiningRef.current = false;
+        setJoined(true);
+      } catch (err) {
+        console.error('Failed to setup session:', err);
+        joiningRef.current = false;
       }
-
-      setJoined(true);
     });
+  }, [isConnected, sessionId, roomId]);
 
+  // Cleanup on unmount only
+  useEffect(() => {
     return () => {
-      if (joined) {
+      if (joinedRef.current) {
+        const socket = getSocket();
         socket.emit('room:leave', { roomId, sessionId });
         cleanupMedia();
         clearAll();
         sendTransportRef.current = null;
         recvTransportRef.current = null;
         setRecvTransport(null);
-        setJoined(false);
       }
+      joinedRef.current = false;
+      joiningRef.current = false;
+      setJoined(false);
     };
-  }, [isConnected, sessionId, roomId, joined]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleEndSession = useCallback(async () => {
     if (!roomId || !sessionId) return;
@@ -191,12 +210,12 @@ export function TeacherDashboard() {
               <>
                 <button
                   onClick={() => { setShowChat(!showChat); if (!showChat) toggleChat(); }}
-                  className={`relative flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
+                  className={`relative flex items-center justify-center h-10 w-10 rounded-xl transition-colors ${
                     showChat ? 'bg-primary-500/15 text-primary-400' : 'text-gray-500 hover:bg-gray-800'
                   }`}
                   title="Toggle chat"
                 >
-                  <MessageCircle className="h-4 w-4" />
+                  <MessageCircle className="h-4.5 w-4.5" />
                   {unreadCount > 0 && !showChat && (
                     <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-500 px-1 text-[9px] font-bold text-white">
                       {unreadCount > 9 ? '9+' : unreadCount}
@@ -205,12 +224,12 @@ export function TeacherDashboard() {
                 </button>
                 <button
                   onClick={() => setShowRoster(!showRoster)}
-                  className={`hidden md:flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
+                  className={`hidden md:flex items-center justify-center h-10 w-10 rounded-xl transition-colors ${
                     showRoster ? 'bg-primary-500/15 text-primary-400' : 'text-gray-500 hover:bg-gray-800'
                   }`}
                   title="Toggle roster"
                 >
-                  <Users className="h-4 w-4" />
+                  <Users className="h-4.5 w-4.5" />
                 </button>
               </>
             )}
@@ -238,6 +257,8 @@ export function TeacherDashboard() {
                   userId={focusedStudentId!}
                   displayName={focusedParticipant.displayName}
                   onClose={unfocusStudent}
+                  onStartPrivateCall={startPrivateCall}
+                  isInCall={voiceMode !== 'off'}
                 />
               )}
             </AnimatePresence>

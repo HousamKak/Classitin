@@ -1,4 +1,4 @@
-import { X, Maximize2, Camera } from 'lucide-react';
+import { X, Maximize2, Camera, Phone } from 'lucide-react';
 import { VideoRenderer } from '@/components/media/VideoRenderer';
 import { useMediaStore } from '@/stores/mediaStore';
 import { Avatar } from '@/components/common/Avatar';
@@ -9,9 +9,11 @@ interface StudentFocusViewProps {
   userId: string;
   displayName: string;
   onClose: () => void;
+  onStartPrivateCall?: (userId: string) => void;
+  isInCall?: boolean;
 }
 
-export function StudentFocusView({ userId, displayName, onClose }: StudentFocusViewProps) {
+export function StudentFocusView({ userId, displayName, onClose, onStartPrivateCall, isInCall }: StudentFocusViewProps) {
   const consumers = useMediaStore((s) => s.consumers);
 
   let track: MediaStreamTrack | null = null;
@@ -40,6 +42,16 @@ export function StudentFocusView({ userId, displayName, onClose }: StudentFocusV
           </span>
         </div>
         <div className="flex items-center gap-1.5">
+          {onStartPrivateCall && !isInCall && (
+            <button
+              onClick={() => onStartPrivateCall(userId)}
+              className="flex h-8 items-center gap-1.5 rounded-xl bg-emerald-500/20 backdrop-blur-sm px-3 text-emerald-400 hover:bg-emerald-500/30 hover:text-emerald-300 transition-colors"
+              title="Private call with student"
+            >
+              <Phone className="h-3.5 w-3.5" />
+              <span className="text-xs font-semibold">Call</span>
+            </button>
+          )}
           {track && (
             <button
               onClick={() => captureScreenshot(track, displayName)}
@@ -58,9 +70,11 @@ export function StudentFocusView({ userId, displayName, onClose }: StudentFocusV
         </div>
       </div>
 
-      {/* Video */}
+      {/* Video — constrained to 70vh to prevent pushing grid off screen */}
       {track ? (
-        <VideoRenderer track={track} className="w-full object-contain" />
+        <div className="aspect-video max-h-[70vh] w-full bg-black">
+          <VideoRenderer track={track} className="w-full h-full object-contain" />
+        </div>
       ) : (
         <div className="flex aspect-video w-full flex-col items-center justify-center gap-3">
           <Avatar name={displayName} size="lg" />

@@ -1,6 +1,6 @@
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useRef, useState, useMemo } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Dimensions, Modal,
+  View, Text, TouchableOpacity, StyleSheet, Alert, Modal, ScrollView,
 } from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useRoomStore } from '@/stores/roomStore';
@@ -12,9 +12,11 @@ import { useScreenCapture } from '@/hooks/useScreenCapture';
 import { useAudio } from '@/hooks/useAudio';
 import { useVoiceEvents } from '@/hooks/useVoiceEvents';
 import { useChat } from '@/hooks/useChat';
+import { useDimensions } from '@/hooks/useDimensions';
 import { getSocket } from '@/services/socket';
 import { consumeStream, produceScreen, closeProducer, setPreferredLayers } from '@/services/mediasoupClient';
 import { THUMBNAIL_LAYER, HD_LAYER } from '@classitin/shared';
+import type { PresenceStatus } from '@classitin/shared';
 import { RTCVideoView } from '@/components/RTCVideoView';
 import { StudentThumbnail } from '@/components/StudentThumbnail';
 import { StudentFocusView } from '@/components/StudentFocusView';
@@ -29,9 +31,12 @@ import type { RootStackParamList } from '@/navigation/AppNavigator';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TeacherDashboard'>;
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const THUMBNAIL_COLS = SCREEN_WIDTH > 600 ? 3 : 2;
-const THUMBNAIL_WIDTH = (SCREEN_WIDTH - spacing.xl * 2 - spacing.sm * (THUMBNAIL_COLS - 1)) / THUMBNAIL_COLS;
+const STATUS_PRIORITY: Record<PresenceStatus, number> = {
+  NEEDS_HELP: 0,
+  ONLINE: 2,
+  IDLE: 3,
+  OFFLINE: 4,
+};
 
 export function TeacherDashboardScreen({ route, navigation }: Props) {
   const { roomId } = route.params;
@@ -54,6 +59,11 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
   const { initDevice, getSendTransport, getRecvTransport, cleanup: cleanupMedia } = useMediasoup(sessionId ?? '');
   const { participants, initRoster } = usePresence(sessionId);
   const { isCapturing, startCapture, stopCapture } = useScreenCapture();
+
+  // Responsive dimensions
+  const { width, height, isLandscape, isTablet } = useDimensions();
+  const thumbnailCols = isTablet ? (isLandscape ? 4 : 3) : (isLandscape ? 3 : 2);
+  const thumbnailWidth = (width - spacing.xl * 2 - spacing.sm * (thumbnailCols - 1)) / thumbnailCols;
 
   // Voice
   const { voiceMode, isMuted, privateCallUserId, startBroadcast, startPrivateCall, stopVoice, toggleMute } =
@@ -218,8 +228,29 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
     ]);
   };
 
-  // Build student list
-  const students = Array.from(participants.values()).filter((p) => p.role === 'STUDENT');
+  // Sort students: needs_help first, then sharing, then online, then idle/offline
+  const students = useMemo(() => {
+    const list = Array.from(participants.values()).filter((p) => p.role === 'STUDENT');
+    list.sort((a, b) => {
+      const aPriority = a.isSharing ? STATUS_PRIORITY[a.status] - 1 : STATUS_PRIORITY[a.status];
+      const bPriority = b.isSharing ? STATUS_PRIORITY[b.status] - 1 : STATUS_PRIORITY[b.status];
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return a.displayName.localeCompare(b.displayName);
+    });
+    return list;
+  }, [participants]);
+
+  // Aggregate stats
+  const stats = useMemo(() => {
+    let sharing = 0, needsHelp = 0, online = 0, offline = 0;
+    for (const s of students) {
+      if (s.isSharing) sharing++;
+      if (s.status === 'NEEDS_HELP') needsHelp++;
+      else if (s.status === 'ONLINE') online++;
+      else if (s.status === 'OFFLINE' || s.status === 'IDLE') offline++;
+    }
+    return { sharing, needsHelp, online, offline };
+  }, [students]);
 
   const getStudentTrack = (userId: string): MediaStreamTrack | null => {
     for (const [, info] of consumers) {
@@ -232,6 +263,19 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
   const focusedStudent = focusedStudentId ? participants.get(focusedStudentId) : null;
   const focusedTrack = focusedStudentId ? getStudentTrack(focusedStudentId) : null;
   const focusedName = focusedStudent?.displayName ?? '';
+
+  // Get all student userIds for swipe navigation in focus view
+  const studentIds = useMemo(() => students.map(s => s.userId), [students]);
+
+  const handleFocusSwipe = useCallback((direction: 'left' | 'right') => {
+    if (!focusedStudentId) return;
+    const idx = studentIds.indexOf(focusedStudentId);
+    if (idx === -1) return;
+    const nextIdx = direction === 'right' ? idx + 1 : idx - 1;
+    if (nextIdx >= 0 && nextIdx < studentIds.length) {
+      setFocusedStudent(studentIds[nextIdx]);
+    }
+  }, [focusedStudentId, studentIds, setFocusedStudent]);
 
   if (!currentRoom || !currentSession) {
     return (
@@ -289,49 +333,128 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
         />
       </View>
 
-      {/* Screen share controls */}
-      <View style={styles.shareSection}>
-        <Text style={styles.sectionLabel}>YOUR SCREEN</Text>
-        <ScreenShareButton
-          isCapturing={isCapturing}
-          isLoading={isShareLoading}
-          onStart={handleStartShare}
-          onStop={handleStopShare}
-        />
-        {localScreenTrack && (
-          <View style={styles.selfPreview}>
-            <RTCVideoView track={localScreenTrack} objectFit="contain" />
-          </View>
-        )}
-      </View>
-
-      {/* Student grid */}
-      <View style={styles.gridSection}>
-        <Text style={styles.sectionLabel}>STUDENTS</Text>
-        <FlatList
-          data={students}
-          keyExtractor={(item) => item.userId}
-          numColumns={THUMBNAIL_COLS}
-          columnWrapperStyle={styles.gridRow}
-          contentContainerStyle={styles.gridContent}
-          renderItem={({ item }) => (
-            <View style={{ width: THUMBNAIL_WIDTH }}>
-              <StudentThumbnail
-                displayName={item.displayName}
-                track={getStudentTrack(item.userId)}
-                status={item.status}
-                isSharing={item.isSharing}
-                onPress={() => setFocusedStudent(item.userId)}
+      {isLandscape ? (
+        /* ============ LANDSCAPE LAYOUT ============ */
+        <View style={styles.landscapeBody}>
+          {/* Left: screen share + controls */}
+          <View style={styles.landscapeLeft}>
+            <View style={styles.shareSection}>
+              <Text style={styles.sectionLabel}>YOUR SCREEN</Text>
+              <ScreenShareButton
+                isCapturing={isCapturing}
+                isLoading={isShareLoading}
+                onStart={handleStartShare}
+                onStop={handleStopShare}
               />
             </View>
-          )}
-          ListEmptyComponent={
-            <View style={styles.emptyGrid}>
-              <Text style={styles.emptyGridText}>Waiting for students to share their screens...</Text>
+            {localScreenTrack && (
+              <View style={[styles.selfPreview, { height: 100 }]}>
+                <RTCVideoView track={localScreenTrack} objectFit="contain" />
+              </View>
+            )}
+          </View>
+
+          {/* Right: student grid (takes most space) */}
+          <View style={styles.landscapeRight}>
+            {/* Aggregate stats */}
+            <View style={styles.statsBar}>
+              {stats.sharing > 0 && (
+                <Text style={styles.statSharing}>{stats.sharing} sharing</Text>
+              )}
+              {stats.needsHelp > 0 && (
+                <Text style={styles.statHelp}>{stats.needsHelp} needs help</Text>
+              )}
+              <Text style={styles.statOnline}>
+                {stats.online + stats.sharing + stats.needsHelp} online
+              </Text>
+              {stats.offline > 0 && (
+                <Text style={styles.statOffline}>{stats.offline} offline</Text>
+              )}
             </View>
-          }
-        />
-      </View>
+            <ScrollView contentContainerStyle={styles.gridContent}>
+              {students.length === 0 ? (
+                <View style={styles.emptyGrid}>
+                  <Text style={styles.emptyGridText}>Waiting for students...</Text>
+                </View>
+              ) : (
+                <View style={styles.gridWrap}>
+                  {students.map((item) => (
+                    <View key={item.userId} style={{ width: thumbnailWidth, marginBottom: spacing.sm }}>
+                      <StudentThumbnail
+                        displayName={item.displayName}
+                        track={getStudentTrack(item.userId)}
+                        status={item.status}
+                        isSharing={item.isSharing}
+                        onPress={() => setFocusedStudent(item.userId)}
+                      />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      ) : (
+        /* ============ PORTRAIT LAYOUT ============ */
+        <>
+          {/* Screen share controls */}
+          <View style={styles.shareSection}>
+            <Text style={styles.sectionLabel}>YOUR SCREEN</Text>
+            <ScreenShareButton
+              isCapturing={isCapturing}
+              isLoading={isShareLoading}
+              onStart={handleStartShare}
+              onStop={handleStopShare}
+            />
+            {localScreenTrack && (
+              <View style={styles.selfPreview}>
+                <RTCVideoView track={localScreenTrack} objectFit="contain" />
+              </View>
+            )}
+          </View>
+
+          {/* Student grid */}
+          <View style={styles.gridSection}>
+            <Text style={styles.sectionLabel}>STUDENTS</Text>
+            {/* Aggregate stats */}
+            <View style={styles.statsBar}>
+              {stats.sharing > 0 && (
+                <Text style={styles.statSharing}>{stats.sharing} sharing</Text>
+              )}
+              {stats.needsHelp > 0 && (
+                <Text style={styles.statHelp}>{stats.needsHelp} needs help</Text>
+              )}
+              <Text style={styles.statOnline}>
+                {stats.online + stats.sharing + stats.needsHelp} online
+              </Text>
+              {stats.offline > 0 && (
+                <Text style={styles.statOffline}>{stats.offline} offline</Text>
+              )}
+            </View>
+            <ScrollView contentContainerStyle={styles.gridContent}>
+              {students.length === 0 ? (
+                <View style={styles.emptyGrid}>
+                  <Text style={styles.emptyGridText}>Waiting for students to share their screens...</Text>
+                </View>
+              ) : (
+                <View style={styles.gridWrap}>
+                  {students.map((item) => (
+                    <View key={item.userId} style={{ width: thumbnailWidth, marginBottom: spacing.sm }}>
+                      <StudentThumbnail
+                        displayName={item.displayName}
+                        track={getStudentTrack(item.userId)}
+                        status={item.status}
+                        isSharing={item.isSharing}
+                        onPress={() => setFocusedStudent(item.userId)}
+                      />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </>
+      )}
 
       {/* Focus view overlay */}
       {focusedStudent && (
@@ -339,6 +462,12 @@ export function TeacherDashboardScreen({ route, navigation }: Props) {
           displayName={focusedName}
           track={focusedTrack}
           onClose={() => setFocusedStudent(null)}
+          onSwipeLeft={() => handleFocusSwipe('left')}
+          onSwipeRight={() => handleFocusSwipe('right')}
+          hasPrev={studentIds.indexOf(focusedStudentId!) > 0}
+          hasNext={studentIds.indexOf(focusedStudentId!) < studentIds.length - 1}
+          onStartPrivateCall={focusedStudentId ? () => startPrivateCall(focusedStudentId) : undefined}
+          isInCall={voiceMode !== 'off'}
         />
       )}
 
@@ -388,6 +517,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     borderWidth: 1,
     borderColor: colors.gray[700],
+    minHeight: 44,
   },
   chatButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.gray[300] },
   unreadBadge: {
@@ -407,6 +537,8 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.2)',
+    minHeight: 44,
+    justifyContent: 'center',
   },
   endSessionText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.red[500] },
   voiceBar: {
@@ -443,9 +575,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
   },
-  gridRow: {
-    gap: spacing.sm,
+  statsBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
     marginBottom: spacing.sm,
+  },
+  statSharing: { fontSize: fontSize.xs, color: colors.emerald[500], fontWeight: '600' },
+  statHelp: { fontSize: fontSize.xs, color: colors.amber[500], fontWeight: '600' },
+  statOnline: { fontSize: fontSize.xs, color: colors.gray[400], fontWeight: '600' },
+  statOffline: { fontSize: fontSize.xs, color: colors.gray[600], fontWeight: '600' },
+  gridWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
   gridContent: {
     paddingTop: spacing.sm,
@@ -459,5 +602,20 @@ const styles = StyleSheet.create({
     color: colors.gray[500],
     fontSize: fontSize.sm,
     textAlign: 'center',
+  },
+  // Landscape layout
+  landscapeBody: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  landscapeLeft: {
+    width: '35%',
+    borderRightWidth: 1,
+    borderRightColor: colors.gray[800],
+  },
+  landscapeRight: {
+    flex: 1,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
   },
 });

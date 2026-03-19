@@ -59,8 +59,8 @@ export function TeacherScreenShare({ sendTransport, getSendTransport }: TeacherS
         <ScreenCaptureButton isCapturing={isCapturing} isSupported={isSupported} onStart={handleStart} onStop={handleStop} />
       </div>
       {localScreenTrack ? (
-        <div className="overflow-hidden rounded-2xl border border-gray-800 bg-black shadow-lg animate-glow">
-          <VideoRenderer track={localScreenTrack} className="w-full max-h-[240px] object-contain" />
+        <div className="overflow-hidden rounded-2xl border border-gray-800 bg-gray-900 shadow-lg animate-glow aspect-video max-h-[240px]">
+          <VideoRenderer track={localScreenTrack} className="w-full h-full object-contain" />
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-800 bg-gray-900/50 py-8 gap-2">

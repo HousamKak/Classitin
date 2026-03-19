@@ -41,6 +41,8 @@ export function StudentView() {
   const sendTransportRef = useRef<Transport | null>(null);
   const recvTransportRef = useRef<Transport | null>(null);
   const [joined, setJoined] = useState(false);
+  const joinedRef = useRef(false);
+  const joiningRef = useRef(false);
   const [myStatus, setMyStatus] = useState<PresenceStatus>('ONLINE');
   const { isBroadcasting, inPrivateCall, privateCallFromName, playAudioTrack } = useVoiceEvents(sessionId);
   const { messages, unreadCount, isOpen: chatOpen, sendMessage, toggleOpen: toggleChat } = useChat(sessionId);
@@ -65,80 +67,97 @@ export function StudentView() {
   }, [roomId, fetchRoom]);
 
   useEffect(() => {
-    if (!isConnected || !sessionId || !roomId || joined) return;
+    if (!isConnected || !sessionId || !roomId) return;
+    if (joinedRef.current || joiningRef.current) return;
 
+    joiningRef.current = true;
     const socket = getSocket();
     socket.emit('room:join', { roomId, sessionId }, async (response: Record<string, unknown>) => {
       if (response.error) {
         console.error('Failed to join room:', response.error);
+        joiningRef.current = false;
         return;
       }
 
-      await initDevice(response.rtpCapabilities as Parameters<typeof initDevice>[0]);
-      initRoster(response.roster as Parameters<typeof initRoster>[0]);
-
-      const transport = await getRecvTransport();
-      recvTransportRef.current = transport;
-
       try {
-        const sendTransport = await getSendTransport();
-        sendTransportRef.current = sendTransport;
+        await initDevice(response.rtpCapabilities as Parameters<typeof initDevice>[0]);
+        initRoster(response.roster as Parameters<typeof initRoster>[0]);
+
+        const transport = await getRecvTransport();
+        recvTransportRef.current = transport;
+
+        try {
+          const sendTransport = await getSendTransport();
+          sendTransportRef.current = sendTransport;
+        } catch (err) {
+          console.warn('Failed to pre-create send transport:', err);
+        }
+
+        const producers = response.existingProducers as Array<{ producerId: string; userId: string; kind: string }>;
+        for (const p of producers) {
+          if (p.userId !== user?.id) {
+            try {
+              const consumer = await consumeStream(transport, sessionId, p.producerId);
+              addConsumer({
+                consumerId: consumer.id,
+                producerId: p.producerId,
+                userId: p.userId,
+                track: consumer.track,
+                kind: consumer.kind,
+                paused: false,
+              });
+            } catch (err) {
+              console.error('Failed to consume:', err);
+            }
+          }
+        }
+
+        socket.on('stream:started', async (payload: { userId: string; producerId: string; kind: string }) => {
+          if (payload.userId !== user?.id && recvTransportRef.current) {
+            try {
+              const consumer = await consumeStream(recvTransportRef.current, sessionId, payload.producerId);
+              addConsumer({
+                consumerId: consumer.id,
+                producerId: payload.producerId,
+                userId: payload.userId,
+                track: consumer.track,
+                kind: consumer.kind,
+                paused: false,
+              });
+            } catch (err) {
+              console.error('Failed to consume new stream:', err);
+            }
+          }
+        });
+
+        joinedRef.current = true;
+        joiningRef.current = false;
+        setJoined(true);
       } catch (err) {
-        console.warn('Failed to pre-create send transport:', err);
+        console.error('Failed to setup session:', err);
+        joiningRef.current = false;
       }
-
-      const producers = response.existingProducers as Array<{ producerId: string; userId: string; kind: string }>;
-      for (const p of producers) {
-        if (p.userId !== user?.id) {
-          try {
-            const consumer = await consumeStream(transport, sessionId, p.producerId);
-            addConsumer({
-              consumerId: consumer.id,
-              producerId: p.producerId,
-              userId: p.userId,
-              track: consumer.track,
-              kind: consumer.kind,
-              paused: false,
-            });
-          } catch (err) {
-            console.error('Failed to consume:', err);
-          }
-        }
-      }
-
-      socket.on('stream:started', async (payload: { userId: string; producerId: string; kind: string }) => {
-        if (payload.userId !== user?.id && recvTransportRef.current) {
-          try {
-            const consumer = await consumeStream(recvTransportRef.current, sessionId, payload.producerId);
-            addConsumer({
-              consumerId: consumer.id,
-              producerId: payload.producerId,
-              userId: payload.userId,
-              track: consumer.track,
-              kind: consumer.kind,
-              paused: false,
-            });
-          } catch (err) {
-            console.error('Failed to consume new stream:', err);
-          }
-        }
-      });
-
-      setJoined(true);
     });
+  }, [isConnected, sessionId, roomId]);
 
+  // Cleanup on unmount only
+  useEffect(() => {
     return () => {
-      if (joined) {
+      if (joinedRef.current) {
+        const socket = getSocket();
         socket.emit('room:leave', { roomId, sessionId });
         socket.off('stream:started');
         cleanupMedia();
         clearAll();
         sendTransportRef.current = null;
         recvTransportRef.current = null;
-        setJoined(false);
       }
+      joinedRef.current = false;
+      joiningRef.current = false;
+      setJoined(false);
     };
-  }, [isConnected, sessionId, roomId, joined]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getSendTransportCb = useCallback(async () => {
     if (sendTransportRef.current) return sendTransportRef.current;
@@ -146,6 +165,16 @@ export function StudentView() {
     sendTransportRef.current = transport;
     return transport;
   }, [getSendTransport]);
+
+  const handleEndVoiceCall = useCallback(() => {
+    if (!sessionId) return;
+    try {
+      const socket = getSocket();
+      socket.emit('voice:call-end', { sessionId, targetUserId: null });
+    } catch {
+      // ignore
+    }
+  }, [sessionId]);
 
   const handleStatusChange = useCallback((status: PresenceStatus) => {
     setMyStatus(status);
@@ -199,12 +228,12 @@ export function StudentView() {
           )}
           <button
             onClick={() => { setShowChat(!showChat); if (!showChat) toggleChat(); }}
-            className={`relative flex items-center justify-center h-9 w-9 rounded-xl transition-colors ${
+            className={`relative flex items-center justify-center h-10 w-10 rounded-xl transition-colors ${
               showChat ? 'bg-primary-500/15 text-primary-400' : 'text-gray-500 hover:bg-gray-800'
             }`}
             title="Toggle chat"
           >
-            <MessageCircle className="h-4 w-4" />
+            <MessageCircle className="h-4.5 w-4.5" />
             {unreadCount > 0 && !showChat && (
               <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-500 px-1 text-[9px] font-bold text-white">
                 {unreadCount > 9 ? '9+' : unreadCount}
@@ -230,6 +259,7 @@ export function StudentView() {
             isBroadcasting={isBroadcasting}
             inPrivateCall={inPrivateCall}
             callerName={privateCallFromName ?? undefined}
+            onEndCall={inPrivateCall ? handleEndVoiceCall : undefined}
           />
 
           {/* Sharing indicator */}

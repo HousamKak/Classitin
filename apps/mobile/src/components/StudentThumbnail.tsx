@@ -14,26 +14,40 @@ interface StudentThumbnailProps {
 
 export function StudentThumbnail({ displayName, track, status, isSharing, onPress }: StudentThumbnailProps) {
   const needsHelp = status === 'NEEDS_HELP';
+  const isOffline = status === 'OFFLINE' || status === 'IDLE';
 
   return (
     <TouchableOpacity
-      style={[styles.container, needsHelp && styles.containerHelp]}
+      style={[
+        styles.container,
+        needsHelp && styles.containerHelp,
+        isOffline && styles.containerOffline,
+      ]}
       onPress={onPress}
       activeOpacity={0.8}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={`${displayName}, ${status.toLowerCase().replace('_', ' ')}${isSharing ? ', sharing screen' : ''}. Tap to enlarge.`}
     >
       <View style={styles.videoContainer}>
         {track ? (
-          <RTCVideoView track={track} objectFit="cover" />
+          <RTCVideoView track={track} objectFit="contain" />
         ) : (
           <View style={styles.placeholder}>
             <Avatar name={displayName} size={40} />
           </View>
         )}
-        {/* Live indicator overlay */}
-        {isSharing && (
+        {/* Live indicator overlay — only when not needing help */}
+        {isSharing && !needsHelp && (
           <View style={styles.liveOverlay}>
             <View style={styles.livePulseDot} />
             <Text style={styles.liveOverlayText}>LIVE</Text>
+          </View>
+        )}
+        {/* Help indicator takes priority */}
+        {needsHelp && (
+          <View style={styles.helpOverlay}>
+            <Text style={styles.helpOverlayText}>HELP</Text>
           </View>
         )}
       </View>
@@ -44,13 +58,8 @@ export function StudentThumbnail({ displayName, track, status, isSharing, onPres
               : needsHelp ? colors.amber[500]
               : colors.gray[500],
           }]} />
-          <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
+          <Text style={[styles.name, isOffline && styles.nameOffline]} numberOfLines={1}>{displayName}</Text>
         </View>
-        {needsHelp && (
-          <View style={styles.helpBadge}>
-            <Text style={styles.helpText}>HELP</Text>
-          </View>
-        )}
       </View>
     </TouchableOpacity>
   );
@@ -68,8 +77,11 @@ const styles = StyleSheet.create({
     borderColor: colors.amber[500],
     borderWidth: 2,
   },
+  containerOffline: {
+    opacity: 0.5,
+  },
   videoContainer: {
-    aspectRatio: 16 / 9,
+    aspectRatio: 4 / 3,
     backgroundColor: colors.black,
   },
   placeholder: {
@@ -101,6 +113,23 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.white,
   },
+  helpOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(245, 158, 11, 0.9)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  helpOverlayText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.white,
+  },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -125,16 +154,7 @@ const styles = StyleSheet.create({
     color: colors.gray[300],
     flex: 1,
   },
-  helpBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginLeft: 4,
-  },
-  helpText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: colors.amber[500],
+  nameOffline: {
+    color: colors.gray[500],
   },
 });

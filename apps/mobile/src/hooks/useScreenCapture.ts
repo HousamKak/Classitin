@@ -1,6 +1,16 @@
 import { useState, useCallback, useRef } from 'react';
+import { Platform, NativeModules, findNodeHandle } from 'react-native';
 import { mediaDevices, MediaStream } from 'react-native-webrtc';
 
+/**
+ * On iOS, system-wide screen capture requires the Broadcast Upload Extension.
+ * react-native-webrtc provides ScreenCapturePickerView to trigger the
+ * RPSystemBroadcastPickerView, and its native ScreenCapturer receives frames
+ * from the extension via Unix domain socket in the App Group container.
+ *
+ * On Android, getDisplayMedia() triggers MediaProjection which already
+ * captures system-wide.
+ */
 export function useScreenCapture() {
   const [isCapturing, setIsCapturing] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
@@ -8,31 +18,57 @@ export function useScreenCapture() {
 
   const startCapture = useCallback(async () => {
     try {
-      // On Android: triggers MediaProjection permission dialog
-      // On iOS: uses RPScreenRecorder for in-app capture
-      const stream = await mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
+      if (Platform.OS === 'ios') {
+        // On iOS, getDisplayMedia with the Broadcast Extension configured
+        // will use the extension for system-wide capture.
+        // react-native-webrtc checks RTCAppGroupIdentifier in Info.plist
+        // and sets up the socket-based frame receiver automatically.
+        const stream = await mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
 
-      const track = stream.getVideoTracks()[0];
-      console.log('[useScreenCapture] Track obtained:', track.id, 'readyState:', track.readyState);
+        const track = stream.getVideoTracks()[0];
+        console.log('[useScreenCapture] iOS broadcast track:', track.id, 'readyState:', track.readyState);
 
-      // react-native-webrtc may need a brief moment before the track is usable
-      await new Promise((r) => setTimeout(r, 200));
+        // Wait for extension to connect and start sending frames
+        await new Promise((r) => setTimeout(r, 500));
 
-      streamRef.current = stream;
-      trackRef.current = track;
-      setIsCapturing(true);
+        streamRef.current = stream;
+        trackRef.current = track;
+        setIsCapturing(true);
 
-      // Handle native stop (e.g., user stops from notification)
-      track.addEventListener('ended', () => {
-        streamRef.current = null;
-        trackRef.current = null;
-        setIsCapturing(false);
-      });
+        track.addEventListener('ended', () => {
+          streamRef.current = null;
+          trackRef.current = null;
+          setIsCapturing(false);
+        });
 
-      return track;
+        return track;
+      } else {
+        // Android: MediaProjection — already system-wide
+        const stream = await mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+
+        const track = stream.getVideoTracks()[0];
+        console.log('[useScreenCapture] Track obtained:', track.id, 'readyState:', track.readyState);
+
+        await new Promise((r) => setTimeout(r, 200));
+
+        streamRef.current = stream;
+        trackRef.current = track;
+        setIsCapturing(true);
+
+        track.addEventListener('ended', () => {
+          streamRef.current = null;
+          trackRef.current = null;
+          setIsCapturing(false);
+        });
+
+        return track;
+      }
     } catch (err) {
       console.error('Screen capture failed:', err);
       setIsCapturing(false);

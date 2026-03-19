@@ -1,5 +1,8 @@
 import { useEffect, useCallback, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Modal } from 'react-native';
+import {
+  View, Text, TouchableOpacity, StyleSheet, Alert, Modal,
+  Animated, PanResponder,
+} from 'react-native';
 import { useAuthStore } from '@/stores/authStore';
 import { useRoomStore } from '@/stores/roomStore';
 import { useMediaStore } from '@/stores/mediaStore';
@@ -9,6 +12,7 @@ import { usePresence } from '@/hooks/usePresence';
 import { useScreenCapture } from '@/hooks/useScreenCapture';
 import { useVoiceEvents } from '@/hooks/useVoiceEvents';
 import { useChat } from '@/hooks/useChat';
+import { useDimensions } from '@/hooks/useDimensions';
 import { getSocket } from '@/services/socket';
 import { consumeStream, produceScreen, closeProducer } from '@/services/mediasoupClient';
 import { RTCVideoView } from '@/components/RTCVideoView';
@@ -43,6 +47,8 @@ export function StudentSessionScreen({ route, navigation }: Props) {
   const { participants, updateMyStatus, initRoster } = usePresence(sessionId);
   const { isCapturing, startCapture, stopCapture } = useScreenCapture();
 
+  const { width, height, isLandscape } = useDimensions();
+
   // Voice events (student receives broadcast/private calls)
   const { isBroadcasting, inPrivateCall, privateCallFromName } = useVoiceEvents(sessionId);
 
@@ -54,6 +60,85 @@ export function StudentSessionScreen({ route, navigation }: Props) {
   const [joined, setJoined] = useState(false);
   const [myStatus, setMyStatus] = useState<PresenceStatus>('ONLINE');
   const [isShareLoading, setIsShareLoading] = useState(false);
+
+  // Pinch-to-zoom state for teacher stream
+  const scaleValue = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
+  const lastScale = useRef(1);
+  const lastDist = useRef(0);
+  const lastTranslate = useRef({ x: 0, y: 0 });
+
+  const pinchResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        // Activate on pinch (2 fingers) or pan when zoomed
+        return gs.numberActiveTouches >= 2 || (lastScale.current > 1 && Math.abs(gs.dx) > 5);
+      },
+      onPanResponderMove: (evt, gs) => {
+        if (gs.numberActiveTouches >= 2) {
+          const touches = evt.nativeEvent.touches;
+          if (touches.length >= 2) {
+            const dx = touches[0].pageX - touches[1].pageX;
+            const dy = touches[0].pageY - touches[1].pageY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (lastDist.current > 0) {
+              const pinch = dist / lastDist.current;
+              const newScale = Math.min(Math.max(lastScale.current * pinch, 1), 5);
+              scaleValue.setValue(newScale);
+            }
+            lastDist.current = dist;
+          }
+        } else if (lastScale.current > 1) {
+          // Pan when zoomed
+          translateX.setValue(lastTranslate.current.x + gs.dx);
+          translateY.setValue(lastTranslate.current.y + gs.dy);
+        }
+      },
+      onPanResponderRelease: () => {
+        // @ts-ignore - _value is internal but accessible
+        lastScale.current = scaleValue._value ?? 1;
+        // @ts-ignore
+        lastTranslate.current = { x: translateX._value ?? 0, y: translateY._value ?? 0 };
+        lastDist.current = 0;
+
+        if (lastScale.current <= 1.05) {
+          // Snap back to 1x
+          Animated.parallel([
+            Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }),
+            Animated.spring(translateX, { toValue: 0, useNativeDriver: true }),
+            Animated.spring(translateY, { toValue: 0, useNativeDriver: true }),
+          ]).start();
+          lastScale.current = 1;
+          lastTranslate.current = { x: 0, y: 0 };
+        }
+      },
+    })
+  ).current;
+
+  // Double-tap to zoom
+  const lastTap = useRef(0);
+  const handleDoubleTap = useCallback(() => {
+    const now = Date.now();
+    if (now - lastTap.current < 300) {
+      // Double tap — toggle zoom
+      if (lastScale.current > 1) {
+        Animated.parallel([
+          Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }),
+          Animated.spring(translateX, { toValue: 0, useNativeDriver: true }),
+          Animated.spring(translateY, { toValue: 0, useNativeDriver: true }),
+        ]).start();
+        lastScale.current = 1;
+        lastTranslate.current = { x: 0, y: 0 };
+      } else {
+        Animated.spring(scaleValue, { toValue: 2.5, useNativeDriver: true }).start();
+        lastScale.current = 2.5;
+      }
+    }
+    lastTap.current = now;
+  }, [scaleValue, translateX, translateY]);
 
   // Find teacher's userId from participants
   const teacherUserId = Array.from(participants.values()).find(
@@ -325,30 +410,107 @@ export function StudentSessionScreen({ route, navigation }: Props) {
         </View>
       )}
 
-      {/* Teacher's screen */}
-      <View style={styles.teacherSection}>
-        <Text style={styles.sectionLabel}>TEACHER'S SCREEN</Text>
-        <View style={styles.teacherVideo}>
-          {teacherTrack ? (
-            <RTCVideoView track={teacherTrack} objectFit="contain" />
-          ) : (
-            <View style={styles.teacherPlaceholder}>
-              <Text style={styles.placeholderText}>
-                {teacherUserId ? 'Teacher is not sharing their screen' : 'Waiting for teacher...'}
-              </Text>
+      {isLandscape ? (
+        /* ============ LANDSCAPE LAYOUT ============ */
+        <View style={styles.landscapeBody}>
+          {/* Teacher's screen — takes most space */}
+          <View style={styles.landscapeMain}>
+            <Text style={styles.sectionLabel}>TEACHER'S SCREEN</Text>
+            <View
+              style={styles.teacherVideo}
+              {...pinchResponder.panHandlers}
+            >
+              {teacherTrack ? (
+                <Animated.View
+                  style={{
+                    flex: 1,
+                    transform: [
+                      { scale: scaleValue },
+                      { translateX },
+                      { translateY },
+                    ],
+                  }}
+                >
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={handleDoubleTap}
+                    style={{ flex: 1 }}
+                  >
+                    <RTCVideoView track={teacherTrack} objectFit="contain" />
+                  </TouchableOpacity>
+                </Animated.View>
+              ) : (
+                <View style={styles.teacherPlaceholder}>
+                  <Text style={styles.placeholderText}>
+                    {teacherUserId ? 'Teacher is not sharing' : 'Waiting for teacher...'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </View>
+
+          {/* Side panel: self preview */}
+          {localScreenTrack && (
+            <View style={styles.landscapeSide}>
+              <Text style={styles.sectionLabel}>YOUR SCREEN</Text>
+              <View style={styles.selfPreviewLandscape}>
+                <RTCVideoView track={localScreenTrack} objectFit="contain" />
+              </View>
             </View>
           )}
         </View>
-      </View>
-
-      {/* Self preview */}
-      {localScreenTrack && (
-        <View style={styles.selfPreviewSection}>
-          <Text style={styles.sectionLabel}>YOUR SCREEN</Text>
-          <View style={styles.selfPreview}>
-            <RTCVideoView track={localScreenTrack} objectFit="contain" />
+      ) : (
+        /* ============ PORTRAIT LAYOUT ============ */
+        <>
+          {/* Teacher's screen — with pinch-to-zoom */}
+          <View style={styles.teacherSection}>
+            <View style={styles.teacherLabelRow}>
+              <Text style={styles.sectionLabel}>TEACHER'S SCREEN</Text>
+              <Text style={styles.zoomHint}>Pinch to zoom · Double-tap to enlarge</Text>
+            </View>
+            <View
+              style={styles.teacherVideo}
+              {...pinchResponder.panHandlers}
+            >
+              {teacherTrack ? (
+                <Animated.View
+                  style={{
+                    flex: 1,
+                    transform: [
+                      { scale: scaleValue },
+                      { translateX },
+                      { translateY },
+                    ],
+                  }}
+                >
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    onPress={handleDoubleTap}
+                    style={{ flex: 1 }}
+                  >
+                    <RTCVideoView track={teacherTrack} objectFit="contain" />
+                  </TouchableOpacity>
+                </Animated.View>
+              ) : (
+                <View style={styles.teacherPlaceholder}>
+                  <Text style={styles.placeholderText}>
+                    {teacherUserId ? 'Teacher is not sharing their screen' : 'Waiting for teacher...'}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+
+          {/* Self preview */}
+          {localScreenTrack && (
+            <View style={styles.selfPreviewSection}>
+              <Text style={styles.sectionLabel}>YOUR SCREEN</Text>
+              <View style={styles.selfPreview}>
+                <RTCVideoView track={localScreenTrack} objectFit="contain" />
+              </View>
+            </View>
+          )}
+        </>
       )}
 
       {/* Chat modal */}
@@ -396,6 +558,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.sm,
     borderWidth: 1,
     borderColor: colors.gray[700],
+    minHeight: 44,
   },
   chatButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.gray[300] },
   unreadBadge: {
@@ -427,6 +590,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: borderRadius.lg,
     backgroundColor: colors.gray[800],
+    minHeight: 44,
+    justifyContent: 'center',
   },
   statusButtonActiveGreen: {
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
@@ -477,6 +642,17 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
+    justifyContent: 'center',
+  },
+  teacherLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  zoomHint: {
+    fontSize: 10,
+    color: colors.gray[600],
   },
   sectionLabel: {
     fontSize: fontSize.xs,
@@ -486,7 +662,8 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   teacherVideo: {
-    flex: 1,
+    aspectRatio: 16 / 9,
+    width: '100%',
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
     backgroundColor: colors.black,
@@ -508,6 +685,29 @@ const styles = StyleSheet.create({
   },
   selfPreview: {
     height: 100,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.black,
+    borderWidth: 1,
+    borderColor: colors.gray[800],
+  },
+  // Landscape layout
+  landscapeBody: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  landscapeMain: {
+    flex: 1,
+    padding: spacing.md,
+  },
+  landscapeSide: {
+    width: '30%',
+    padding: spacing.md,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.gray[800],
+  },
+  selfPreviewLandscape: {
+    flex: 1,
     borderRadius: borderRadius.md,
     overflow: 'hidden',
     backgroundColor: colors.black,
