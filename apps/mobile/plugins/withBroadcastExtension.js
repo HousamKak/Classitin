@@ -6,7 +6,12 @@
  * receives frames from the extension via a Unix domain socket in the
  * shared App Group container.
  */
-const { withXcodeProject, withEntitlementsPlist, withInfoPlist } = require('@expo/config-plugins');
+// Resolve @expo/config-plugins relative to expo's install location
+// to work with pnpm's strict node_modules hoisting.
+const configPluginsPath = require.resolve('@expo/config-plugins', {
+  paths: [require.resolve('expo/package.json')],
+});
+const { withXcodeProject, withEntitlementsPlist, withInfoPlist } = require(configPluginsPath);
 const path = require('path');
 const fs = require('fs');
 
