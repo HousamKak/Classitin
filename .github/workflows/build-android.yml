@@ -122,7 +122,7 @@ jobs:
         with:
           name: classitin-release-apk
           path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-          retention-days: 30
+          retention-days: 1
 
       # --- Build AAB ---
       - name: Build AAB
@@ -143,4 +143,4 @@ jobs:
         with:
           name: classitin-release-aab
           path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
-          retention-days: 30
+          retention-days: 1
